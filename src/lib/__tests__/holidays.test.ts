@@ -41,17 +41,17 @@ describe("Scheduler mit Feiertagen (Dezember 2026)", () => {
     expect(total).toBe(1022 * 60);
   });
 
-  it("plant Schichten an Feiertagen im 11:30–22:00-Fenster", () => {
+  it("plant Schichten an Feiertagen im 11:00–22:00-Fenster", () => {
     const shifts = generateSchedule({
       year: 2026,
       month: 12,
       workHours: DEFAULT_WORK_HOURS,
       employees: SAMPLE_EMPLOYEES,
     });
-    // 25.12. ist Feiertag -> Fenster wie Sonntag: frühester Beginn 11:30 (690).
+    // 25.12. ist Feiertag -> eigenes Fenster: frühester Beginn 11:00 (660).
     const xmas = shifts.filter((s) => s.date === "2026-12-25");
     for (const s of xmas) {
-      expect(s.startMinutes).toBeGreaterThanOrEqual(11 * 60 + 30);
+      expect(s.startMinutes).toBeGreaterThanOrEqual(11 * 60);
       expect(s.endMinutes).toBeLessThanOrEqual(22 * 60);
     }
   });

@@ -29,13 +29,13 @@ export const DAY_WEIGHTS: Record<WeekdayKey, number> = {
 
 /**
  * Gewünschter Anteil an Spätschicht-Stunden je Wochentag.
- * Der Abend ist grundsätzlich stärker besetzt als der Vormittag (> 0,5),
- * am Wochenende und sonntags noch deutlicher.
+ * Basis laut Chef: der Abend macht rund 2/3 des Umsatzes aus -> 0,67 an den
+ * ruhigen Tagen. Fr/Sa/So liegen darüber, weil dort abends noch mehr los ist.
  */
 export const LATE_SHIFT_RATIOS: Record<WeekdayKey, number> = {
-  monday: 0.62,
-  tuesday: 0.62,
-  wednesday: 0.62,
+  monday: 0.67,
+  tuesday: 0.67,
+  wednesday: 0.67,
   thursday: 0.68,
   friday: 0.72,
   saturday: 0.74,

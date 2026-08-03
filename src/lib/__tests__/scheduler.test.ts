@@ -4,6 +4,7 @@ import { validateSchedule } from "../validation";
 import { maxConsecutiveRun } from "../consecutive";
 import { SAMPLE_EMPLOYEES } from "../sampleData";
 import { DEFAULT_WORK_HOURS } from "../workHours";
+import { calculatePause } from "../time";
 
 describe("Scheduler – August 2026 Beispieldaten", () => {
   const shifts = generateSchedule({
@@ -56,7 +57,7 @@ describe("Scheduler – August 2026 Beispieldaten", () => {
   it("jede Schicht: paid <= 8 h und korrekte Pause", () => {
     for (const s of shifts) {
       expect(s.paidMinutes).toBeLessThanOrEqual(8 * 60);
-      expect(s.pauseMinutes).toBe(s.paidMinutes > 360 ? 30 : 0);
+      expect(s.pauseMinutes).toBe(calculatePause(s.paidMinutes));
       expect(s.endMinutes - s.startMinutes - s.pauseMinutes).toBe(s.paidMinutes);
     }
   });

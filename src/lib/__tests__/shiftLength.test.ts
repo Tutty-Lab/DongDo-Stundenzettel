@@ -3,9 +3,10 @@ import { chooseShiftHours, maxShiftHoursForWindow } from "../scheduler";
 
 describe("maxShiftHoursForWindow", () => {
   it("liefert die längste passende Schicht fürs Zeitfenster", () => {
-    expect(maxShiftHoursForWindow(11.5 * 60)).toBe(8); // 10:30–22:00
-    expect(maxShiftHoursForWindow(10.5 * 60)).toBe(8); // 11:30–22:00 (8h = 8,5h Anwesenheit)
-    expect(maxShiftHoursForWindow(5.5 * 60)).toBe(5); // halber Tag 10:30–16:00
+    expect(maxShiftHoursForWindow(11 * 60)).toBe(8); // 11:00–22:00 (8h = 9h Anwesenheit)
+    expect(maxShiftHoursForWindow(9 * 60)).toBe(8); // exakt 9 h Anwesenheit passt noch
+    expect(maxShiftHoursForWindow(9 * 60 - 1)).toBe(7); // knapp zu kurz für die 8-h-Schicht
+    expect(maxShiftHoursForWindow(5.5 * 60)).toBe(5); // halber Tag 11:00–16:30
     expect(maxShiftHoursForWindow(4.5 * 60)).toBe(4);
     expect(maxShiftHoursForWindow(3.5 * 60)).toBe(0); // zu kurz für 4 h
   });

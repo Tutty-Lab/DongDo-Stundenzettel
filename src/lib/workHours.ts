@@ -32,22 +32,23 @@ export type ResolvedDay = { closed: boolean; window: DayWindow };
 
 const w = (start: number, end: number): DayWindow => ({ startMinutes: start, endMinutes: end });
 
-// Standard für den Shop in Gütersloh:
-//   Mo–Sa 10:30–22:00, So 11:30–22:00, Feiertag 11:30–22:00
-const WEEKDAY = w(10 * 60 + 30, 22 * 60); // 10:30–22:00
-const SUNDAY = w(11 * 60 + 30, 22 * 60); // 11:30–22:00
+// Vorgabe des Chefs: Arbeitszeit (nicht Öffnungszeit) täglich 11:00–22:00 –
+// an allen Wochentagen gleich, auch sonntags und an Feiertagen.
+// Das Fenster ist 11 h lang, die längste Schicht (8 h + 1 h Pause = 9 h
+// Anwesenheit) passt damit sowohl früh als auch spät hinein.
+const ALL_DAYS = w(11 * 60, 22 * 60); // 11:00–22:00
 
 export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
   perWeekday: {
-    monday: { ...WEEKDAY },
-    tuesday: { ...WEEKDAY },
-    wednesday: { ...WEEKDAY },
-    thursday: { ...WEEKDAY },
-    friday: { ...WEEKDAY },
-    saturday: { ...WEEKDAY },
-    sunday: { ...SUNDAY },
+    monday: { ...ALL_DAYS },
+    tuesday: { ...ALL_DAYS },
+    wednesday: { ...ALL_DAYS },
+    thursday: { ...ALL_DAYS },
+    friday: { ...ALL_DAYS },
+    saturday: { ...ALL_DAYS },
+    sunday: { ...ALL_DAYS },
   },
-  holiday: { ...SUNDAY },
+  holiday: { ...ALL_DAYS },
 };
 
 /**
