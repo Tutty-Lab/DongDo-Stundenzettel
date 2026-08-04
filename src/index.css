@@ -44,7 +44,7 @@ body {
 /* Bühne für den PDF-Export: muss wirklich gerendert sein (display:none kann
    html2canvas nicht aufnehmen), liegt deshalb nur außerhalb des Sichtfelds. */
 .pdf-stage {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: -10000px;
   width: 210mm;

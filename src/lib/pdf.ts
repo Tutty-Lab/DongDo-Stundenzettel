@@ -31,10 +31,22 @@ export async function elementsToPdf(elements: HTMLElement[], filename: string): 
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
   for (let i = 0; i < elements.length; i++) {
-    const canvas = await html2canvas(elements[i], {
+    const el = elements[i];
+    // Breite/Höhe UND Fenstermaße explizit setzen. Ohne das klont html2canvas
+    // in ein iframe so breit wie der Bildschirm – auf dem Handy ~360 px statt
+    // der 794 px einer A4-Seite, und die PDF kommt leer oder abgeschnitten.
+    const elWidth = el.scrollWidth;
+    const elHeight = el.scrollHeight;
+    const canvas = await html2canvas(el, {
       scale: 2, // schärfer als 1:1, aber noch vertretbare Dateigröße
       backgroundColor: "#ffffff",
       logging: false,
+      width: elWidth,
+      height: elHeight,
+      windowWidth: elWidth,
+      windowHeight: elHeight,
+      scrollX: 0,
+      scrollY: 0,
     });
 
     // Seitenverhältnis beibehalten und in die A4-Seite einpassen.
@@ -57,5 +69,36 @@ export async function elementsToPdf(elements: HTMLElement[], filename: string): 
     );
   }
 
-  doc.save(filename);
+  await deliver(doc.output("blob"), filename);
+}
+
+/**
+ * PDF ausliefern. Auf dem Handy NICHT einfach herunterladen:
+ * iOS Safari ignoriert das download-Attribut und zeigt die PDF stattdessen
+ * nur an, statt sie zu speichern. Deshalb zuerst das System-Teilen-Menü
+ * anbieten („In Dateien sichern", per Zalo/Mail verschicken …) und nur am
+ * Rechner den klassischen Download nehmen.
+ */
+async function deliver(blob: Blob, filename: string): Promise<void> {
+  const file = new File([blob], filename, { type: "application/pdf" });
+
+  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    } catch (err) {
+      // Abbruch durch den Nutzer ist kein Fehler – dann gar nichts tun.
+      if (err instanceof Error && err.name === "AbortError") return;
+      // Sonst (z.B. abgelaufene Nutzerinteraktion) unten normal herunterladen.
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

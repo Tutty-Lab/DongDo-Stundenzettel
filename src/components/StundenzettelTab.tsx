@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee } from "../types";
@@ -47,12 +47,10 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     }
   }
 
-  // Dọn vùng in ẩn sau khi in xong (nếu trình duyệt hỗ trợ).
-  useEffect(() => {
-    const clear = () => setPrintList(null);
-    window.addEventListener("afterprint", clear);
-    return () => window.removeEventListener("afterprint", clear);
-  }, []);
+  // Vùng in KHÔNG được dọn theo sự kiện "afterprint": trên Android sự kiện đó
+  // bắn ra ngay khi gọi window.print(), trước lúc trình duyệt dựng xong trang
+  // — nội dung bị xoá mất và tờ in ra trắng. Vùng này vốn đã ẩn trên màn hình
+  // nên cứ để nguyên; lần in sau sẽ ghi đè bằng danh sách mới.
 
   if (schedule.employees.length === 0) {
     return (
