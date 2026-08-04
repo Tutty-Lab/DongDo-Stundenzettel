@@ -90,7 +90,7 @@ export function DocsTab() {
             Mỗi người phải đạt <b>đúng định mức tháng</b> (Sollstunden) — không thừa, không thiếu.
           </li>
           <li>
-            <b>Giờ nghỉ (Pause) không tính</b> vào định mức: đến 6h công = 0 phút, trên 6h công = 30 phút.
+            <b>Giờ nghỉ (Pause) không tính</b> vào định mức: dưới 6h công = 0 phút, ca 6h và 7h = 30 phút, từ 8h trở lên = 60 phút.
           </li>
         </ul>
       </Section>

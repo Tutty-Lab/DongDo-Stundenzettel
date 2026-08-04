@@ -25,15 +25,18 @@ export function minutesToTime(totalMinutes: number): string {
 }
 
 /**
- * Pausenregel:
- * - bezahlte Arbeitszeit bis einschließlich 6 h -> 0 Minuten Pause
- * - bezahlte Arbeitszeit über 6 h -> 30 Minuten Pause (gesetzlich, ArbZG §4)
- * - bezahlte Arbeitszeit ab 8 h -> 60 Minuten Pause (Vorgabe des Chefs,
- *   mehr als das Gesetz verlangt; 8 h Arbeit + 1 h Pause = 9 h Anwesenheit)
+ * Pausenregel (Vorgabe des Chefs):
+ * - unter 6 h  -> 0 Minuten
+ * - 6 h und 7 h -> 30 Minuten
+ * - ab 8 h     -> 60 Minuten (8 h Arbeit + 1 h Pause = 9 h Anwesenheit)
+ *
+ * Liegt bei der 6-h-Schicht bewusst über dem Gesetz: ArbZG §4 verlangt erst
+ * ÜBER 6 h eine Pause, hier bekommt schon die glatte 6-h-Schicht ihre 30 min.
  */
 export function calculatePause(paidMinutes: number): number {
-  if (paidMinutes >= 480) return 60; // 8-h-Schicht: Vorgabe des Chefs = 1 Stunde
-  return paidMinutes > 360 ? 30 : 0; // > 6 h: gesetzliche 30 Minuten (ArbZG §4)
+  if (paidMinutes >= 480) return 60;
+  if (paidMinutes >= 360) return 30;
+  return 0;
 }
 
 /**

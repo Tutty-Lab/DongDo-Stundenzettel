@@ -6,6 +6,12 @@ import { splitTargetHours } from "../lib/splitTargetHours";
 const inputClass =
   "rounded border border-slate-300 px-2 py-1 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500";
 
+/**
+ * Ab hier wird gewarnt. 192 h = 24 Tage à 8 h; darüber wird der Monat sehr
+ * eng (6-Tage-Regel) und arbeitsrechtlich heikel.
+ */
+export const WARN_HOURS = 192;
+
 /** Số ngày làm (= số ca) cho một mục tiêu, hoặc thông báo lỗi. */
 function splitInfo(targetHours: number, type: EmploymentType): { ok: boolean; text: string } {
   try {
@@ -79,6 +85,7 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
         <div className="space-y-2">
           {schedule.employees.map((emp) => {
             const info = splitInfo(emp.targetMinutes / 60, emp.employmentType);
+            const tooMany = emp.targetMinutes / 60 > WARN_HOURS;
             return (
               <div
                 key={emp.id}
@@ -142,6 +149,14 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
                   <span className={`text-xs ${info.ok ? "text-slate-500" : "text-rose-600"}`}>
                     {info.text}
                   </span>
+                  {tooMany && (
+                    <span
+                      className="text-xs text-amber-600 font-medium"
+                      title={`Trên ${WARN_HOURS}h/tháng rất khó xếp (tối đa 6 ngày làm liên tiếp) và dễ vượt giới hạn giờ làm theo luật Đức.`}
+                    >
+                      ⚠ &gt;{WARN_HOURS}h
+                    </span>
+                  )}
                   <button
                     onClick={() => removeEmployee(emp.id)}
                     className="text-rose-600 hover:text-rose-800 text-sm font-medium"

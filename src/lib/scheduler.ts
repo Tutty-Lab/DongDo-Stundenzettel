@@ -70,6 +70,8 @@ type SchedulerState = {
   /** Aufgelöster Tag (geschlossen? + Arbeitszeit-Fenster) für ein Datum. */
   dayOf: (isoDate: string) => ResolvedDay;
   rng: () => number;
+  /** true = Schichtlängen mischen; false = immer die längste (Rückfallmodus). */
+  varyLengths: boolean;
 };
 
 /** Länge des Zeitfensters in Minuten (0 wenn geschlossen). */
@@ -89,6 +91,49 @@ function isWeekend(isoDate: string): boolean {
 }
 
 const SHIFT_HOURS_DESC = [8, 7, 6, 5, 4] as const;
+
+/**
+ * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs):
+ * Vollzeit 6/7/8 h, Teilzeit die volle Bandbreite 4..8 h.
+ */
+const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
+  VOLLZEIT: [6, 7, 8],
+  TEILZEIT: [4, 5, 6, 7, 8],
+};
+
+/** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
+const ALL_HOURS: readonly number[] = [4, 5, 6, 7, 8];
+
+/**
+ * Lässt sich `hours` restlos in Schichten aus `allowed` zerlegen?
+ * Nötig, weil z.B. 11 h mit nur 6/7/8-h-Schichten nicht aufgeht – ohne diese
+ * Prüfung liefe der Scheduler in eine Sackgasse und das Soll bliebe offen.
+ */
+const decomposeCache = new Map<string, boolean>();
+function canDecompose(hours: number, allowed: readonly number[]): boolean {
+  if (hours === 0) return true;
+  if (hours < Math.min(...allowed)) return false;
+
+  const key = `${allowed.length}:${hours}`;
+  const cached = decomposeCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let ok = false;
+  for (const h of allowed) {
+    if (canDecompose(hours - h, allowed)) {
+      ok = true;
+      break;
+    }
+  }
+  decomposeCache.set(key, ok);
+  return ok;
+}
+
+/** Längstmögliche Schicht je Anstellungsart – für die Kapazitätsrechnung. */
+const PREFERRED_HOURS: Record<Employee["employmentType"], number> = {
+  VOLLZEIT: 8,
+  TEILZEIT: 8,
+};
 
 /** Größte Schichtlänge (Stunden), deren Anwesenheit noch ins Fenster passt (0 = keine). */
 export function maxShiftHoursForWindow(windowMinutes: number): number {
@@ -112,22 +157,53 @@ export function chooseShiftHours(
   remainingMinutes: number,
   maxHours: number,
   employmentType: Employee["employmentType"],
+  /** Mindestlänge, um das Soll bis Monatsende noch zu schaffen (Stunden). */
+  needHours = 8,
+  /** Ohne Zufallsquelle wird deterministisch die kürzeste taugliche gewählt. */
+  rng?: () => number,
 ): number {
   const remainingHours = remainingMinutes / 60;
   const cap = Math.min(8, maxHours, remainingHours);
   if (cap < 4) return 0;
 
-  // Präferenz-Reihenfolge: Vollzeit lange Schichten, Teilzeit mittlere/kurze.
-  const preference =
-    employmentType === "VOLLZEIT" ? [8, 7, 6, 5, 4] : [5, 6, 4, 7, 8];
+  // Erlaubte Längen je Anstellungsart (Vorgabe des Chefs): Vollzeit macht keine
+  // Kurzschichten, Teilzeit darf die ganze Bandbreite.
+  const pick = (allowed: readonly number[]): number[] => {
+    const out: number[] = [];
+    for (const hours of allowed) {
+      if (hours > cap) continue;
+      // Der Rest muss mit denselben Längen restlos aufgehen. Bei Vollzeit
+      // (6/7/8) sind z.B. 9, 10, 11 oder 17 Stunden Sackgassen.
+      if (canDecompose(remainingHours - hours, allowed)) out.push(hours);
+    }
+    return out;
+  };
 
-  for (const hours of preference) {
-    if (hours > cap) continue;
-    const rest = remainingHours - hours;
-    // Rest muss exakt in 4..8-h-Schichten aufteilbar bleiben (0 oder >= 4).
-    if (rest === 0 || rest >= 4) return hours;
-  }
-  return 0;
+  // Erst die für die Anstellungsart vorgesehenen Längen. Geht dort nichts –
+  // etwa an einem halben Tag, an dem keine 6-h-Schicht mehr hineinpasst –
+  // greift die volle Bandbreite, damit auch Vollzeit an dem Tag arbeiten kann.
+  let valid = pick(ALLOWED_HOURS[employmentType]);
+  if (valid.length === 0) valid = pick(ALL_HOURS);
+  if (valid.length === 0) return 0;
+
+  // Früher entschied eine feste Rangliste (Vollzeit 8, Teilzeit 5). Ergebnis:
+  // jede Vollzeitschicht war 8 h, jede Teilzeitschicht 5 h – keinerlei
+  // Abwechslung, und Teilzeit war faktisch auf 5 h/Tag gedeckelt.
+  //
+  // Jetzt: unter allen Längen zufällig wählen, aber nur solche, die das Tempo
+  // halten. Wer noch viel Soll und wenig Tage hat, bekommt zwangsläufig lange
+  // Schichten; wer gut liegt, bekommt Abwechslung.
+  const onPace = valid.filter((h) => h >= needHours);
+  const pool = onPace.length > 0 ? onPace : [valid[valid.length - 1]];
+
+  if (!rng) return pool[pool.length - 1];
+
+  // „Bester von zwei Würfen": erzeugt Abwechslung, gewichtet aber zugunsten
+  // längerer Schichten. Rein gleichverteilt würden zu viele kurze Schichten
+  // fallen und die verfügbaren Tage wären vor Monatsende aufgebraucht.
+  const a = pool[Math.floor(rng() * pool.length)];
+  const b = pool[Math.floor(rng() * pool.length)];
+  return Math.max(a, b);
 }
 
 /** Stabile Basisordnung: Vollzeit zuerst, dann nach Id. */
@@ -150,10 +226,11 @@ function chooseTemplateType(
   const desired = LATE_SHIFT_RATIOS[effKey];
   const currentLateRatio = ds.totalPaid > 0 ? ds.latePaid / ds.totalPaid : 0;
 
-  // Teilzeit tendenziell in Spätschichten; Sonntag/Feiertag stark abends.
+  // Teilzeit tendenziell in Spätschichten. Früher wurde sonntags zusätzlich
+  // auf 0,95 hochgezwungen – damit stand am Sonntag praktisch niemand zur
+  // Öffnung um 11:00 im Laden. Jetzt gilt die konfigurierte Quote.
   let threshold = desired;
   if (employmentType === "TEILZEIT") threshold += 0.15;
-  if (effKey === "sunday") threshold = Math.max(threshold, 0.95);
 
   return currentLateRatio < threshold ? "LATE" : "EARLY";
 }
@@ -206,11 +283,27 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
   const worked = state.worked.get(employee.id)!;
   const weekendCount = state.weekendCount.get(employee.id) ?? 0;
 
+  // Erst zählen, wie viele Tage überhaupt noch in Frage kommen. Daraus ergibt
+  // sich das nötige Tempo (Stunden je verbleibendem Tag) – ohne das würde die
+  // zufällige Längenwahl das Monats-Soll reißen.
+  let daysLeft = 0;
+  for (const isoDate of state.dates) {
+    if (worked.has(isoDate)) continue;
+    const day = state.dayOf(isoDate);
+    if (day.closed) continue;
+    if (maxShiftHoursForWindow(windowLength(day)) === 0) continue;
+    if (consecutiveRunLengthWith(worked, isoDate) > 6) continue;
+    daysLeft += 1;
+  }
+  // daysLeft ist eine Obergrenze: greedy belegt nie wirklich JEDEN erlaubten
+  // Tag, weil die 6-Tage-Regel Lücken erzwingt. Ohne Sicherheitsabschlag wählt
+  // der Zufall zu kurze Schichten und das Soll geht am Monatsende nicht auf.
+  const usableDays = Math.max(1, Math.floor(daysLeft * 0.9));
+  const needHours = daysLeft > 0 ? Math.ceil(remaining / 60 / usableDays) : 8;
+
   let bestDate: string | null = null;
   let bestHours = 0;
   let bestScore = Number.NEGATIVE_INFINITY;
-  let fallbackDate: string | null = null; // gültiger Tag, ignoriert 6-Tage-Regel
-  let fallbackHours = 0;
 
   for (const isoDate of state.dates) {
     if (worked.has(isoDate)) continue; // max. ein Dienst pro Tag
@@ -219,16 +312,21 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
 
     // Längste Schicht, die ins Fenster passt UND den Rest exakt aufteilbar lässt.
     const maxHours = maxShiftHoursForWindow(windowLength(day));
-    const hours = chooseShiftHours(remaining, maxHours, employee.employmentType);
+    const hours = chooseShiftHours(
+      remaining,
+      maxHours,
+      employee.employmentType,
+      needHours,
+      state.varyLengths ? state.rng : undefined,
+    );
     if (hours === 0) continue; // hier passt keine gültige Schicht
 
-    if (fallbackDate === null) {
-      fallbackDate = isoDate;
-      fallbackHours = hours;
-    }
-
+    // Harte Regel. Früher gab es hier einen Ausweichtag, der diese Prüfung
+    // übersprungen hat – dabei entstanden lautlos Pläne mit bis zu 28
+    // Arbeitstagen am Stück. Lieber gar keinen Plan als einen unzulässigen:
+    // ohne gültigen Tag bleibt das Soll offen und generateSchedule wirft.
     const runLength = consecutiveRunLengthWith(worked, isoDate);
-    if (runLength > 6) continue; // harte Regel
+    if (runLength > 6) continue;
 
     const ds = state.dateState.get(isoDate)!;
     const deficitHours = (state.rawTarget.get(isoDate)! - ds.totalPaid) / 60;
@@ -253,11 +351,9 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     }
   }
 
-  const target = bestDate ?? fallbackDate;
-  const hours = bestDate ? bestHours : fallbackHours;
-  if (target === null || hours === 0) return false;
+  if (bestDate === null || bestHours === 0) return false;
 
-  const shift = makeShift(state, employee, target, hours * 60);
+  const shift = makeShift(state, employee, bestDate, bestHours * 60);
   applyShift(state, shift);
   state.remaining.set(employee.id, remaining - shift.paidMinutes);
   return true;
@@ -340,6 +436,159 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
   }
 }
 
+/** Dreht NUR Früh/Spät um. Dauer bleibt gleich => Monats-Soll bleibt exakt. */
+function retypeShift(state: SchedulerState, shift: Shift, type: TemplateType): void {
+  if (shift.shiftType === type) return;
+  const win = state.dayOf(shift.date).window;
+  const tpl = getShiftTemplate(shift.paidMinutes / 60, type, win.startMinutes, win.endMinutes);
+  const ds = state.dateState.get(shift.date)!;
+
+  if (shift.shiftType === "LATE") ds.latePaid -= shift.paidMinutes;
+  shift.startMinutes = tpl.startMinutes;
+  shift.endMinutes = tpl.endMinutes;
+  shift.pauseMinutes = tpl.pauseMinutes;
+  shift.shiftType = tpl.type;
+  if (tpl.type === "LATE") ds.latePaid += shift.paidMinutes;
+}
+
+/**
+ * Nachlauf über die Schichttypen. Zwei Ziele, in dieser Reihenfolge:
+ *  1. Die Spätquote je Tag näher an den Sollwert bringen (vorher schwankte
+ *     sie stark, obwohl für alle ruhigen Tage derselbe Wert gilt).
+ *  2. Wichtiger als jede Quote: an jedem offenen Tag muss jemand aufsperren
+ *     UND jemand zusperren. Vorher kam es vor, dass um 11:00 niemand da war.
+ * Es wird ausschließlich der Typ gedreht, nie die Dauer – das Soll bleibt exakt.
+ */
+function balanceShiftTypes(state: SchedulerState): void {
+  for (const isoDate of state.dates) {
+    const day = state.dayOf(isoDate);
+    if (day.closed) continue;
+
+    const onDay = state.shifts.filter((s) => s.date === isoDate);
+    if (onDay.length === 0) continue;
+
+    const ds = state.dateState.get(isoDate)!;
+    const desired = LATE_SHIFT_RATIOS[state.effKeyOf(isoDate)];
+
+    // 1. Quote annähern: jeweils die Schicht drehen, die am meisten hilft.
+    for (let step = 0; step < onDay.length * 2; step++) {
+      if (ds.totalPaid === 0) break;
+      let best: Shift | null = null;
+      let bestDiff = Math.abs(ds.latePaid / ds.totalPaid - desired);
+      for (const s of onDay) {
+        const late =
+          s.shiftType === "LATE" ? ds.latePaid - s.paidMinutes : ds.latePaid + s.paidMinutes;
+        const diff = Math.abs(late / ds.totalPaid - desired);
+        if (diff < bestDiff - 1e-9) {
+          bestDiff = diff;
+          best = s;
+        }
+      }
+      if (!best) break;
+      retypeShift(state, best, best.shiftType === "LATE" ? "EARLY" : "LATE");
+    }
+
+    // 2. Öffnen/Schließen sichern. Mit nur einer Schicht am Tag geht beides
+    //    nicht – dann bleibt es bei der Quote-Entscheidung.
+    if (onDay.length < 2) continue;
+
+    const shortestOf = (list: Shift[]) =>
+      list.length === 0 ? null : list.reduce((a, b) => (a.paidMinutes <= b.paidMinutes ? a : b));
+
+    let flipped: Shift | null = null;
+    if (!onDay.some((s) => s.startMinutes === day.window.startMinutes)) {
+      const victim = shortestOf(onDay.filter((s) => s.shiftType === "LATE"));
+      if (victim) {
+        retypeShift(state, victim, "EARLY");
+        flipped = victim;
+      }
+    }
+    if (!onDay.some((s) => s.endMinutes === day.window.endMinutes)) {
+      const victim = shortestOf(
+        onDay.filter((s) => s.shiftType === "EARLY" && s !== flipped),
+      );
+      if (victim) retypeShift(state, victim, "LATE");
+    }
+  }
+}
+
+/**
+ * Obergrenze für EINEN Mitarbeiter: wie viele Tage und Stunden im Monat
+ * überhaupt möglich sind. Greedy von vorn – an jedem offenen Tag arbeiten,
+ * solange die 6-Tage-Regel es zulässt; danach zwingend ein freier Tag.
+ * Das ist das Maximum, mehr geht rein rechnerisch nicht.
+ */
+function monthCapacity(
+  dates: string[],
+  dayOf: (isoDate: string) => ResolvedDay,
+  capHours = 8,
+): { openDays: number; maxDays: number; maxMinutes: number } {
+  let openDays = 0;
+  let maxDays = 0;
+  let maxMinutes = 0;
+  let run = 0;
+
+  for (const isoDate of dates) {
+    const day = dayOf(isoDate);
+    if (day.closed) {
+      run = 0; // geschlossener Tag zählt als Pause
+      continue;
+    }
+    openDays += 1;
+    const hours = Math.min(maxShiftHoursForWindow(windowLength(day)), capHours);
+    if (hours < 4) continue; // Fenster zu kurz für die kürzeste Schicht
+
+    if (run >= 6) {
+      run = 0; // Pflicht-Ruhetag
+      continue;
+    }
+    run += 1;
+    maxDays += 1;
+    maxMinutes += hours * 60;
+  }
+
+  return { openDays, maxDays, maxMinutes };
+}
+
+/** Fehlermeldung, die auch sagt WARUM es nicht aufgeht. */
+function buildUnmetMessage(
+  state: SchedulerState,
+  unmet: Employee[],
+  dates: string[],
+  dayOf: (isoDate: string) => ResolvedDay,
+): string {
+  const full = monthCapacity(dates, dayOf, PREFERRED_HOURS.VOLLZEIT);
+
+
+  const missing = unmet
+    .map((e) => {
+      const short = state.remaining.get(e.id)!;
+      const done = (e.targetMinutes - short) / 60;
+      const capMin = full.maxMinutes;
+      const overCap = e.targetMinutes > capMin ? ` — vượt trần ${capMin / 60}h` : "";
+      return `${e.name} chỉ xếp được ${done}h / ${e.targetMinutes / 60}h${overCap}`;
+    })
+    .join("; ");
+
+  if (full.maxDays === 0) {
+    return (
+      `Không xếp được ca nào (${missing}). ` +
+      `Tháng này có ${full.openDays} ngày mở cửa nhưng khung giờ làm quá ngắn — ` +
+      `không đủ cho cả ca ngắn nhất (4h). Hãy nới khung giờ làm ở tab Cài đặt.`
+    );
+  }
+
+  // maxMinutes ist eine OBERGRENZE (jeden erlaubten Tag die längste Schicht).
+  // Der greedy Scheduler erreicht sie nicht immer – daher als Decke formulieren.
+  return (
+    `Không xếp đủ định mức: ${missing}. ` +
+    `Tháng này có ${full.openDays} ngày mở cửa; do quy tắc tối đa 6 ngày làm ` +
+    `liên tiếp, mỗi người làm được nhiều nhất ${full.maxDays} ngày — trần lý ` +
+    `thuyết ${full.maxMinutes / 60}h/người, thực tế thấp hơn. ` +
+    `Hãy giảm định mức, nới khung giờ làm, bớt ngày đóng cửa, hoặc thêm người.`
+  );
+}
+
 /**
  * Hauptfunktion: erzeugt die Schichten für den Monat.
  * Gibt eine neue Liste generierter Shifts zurück (verändert keine Eingaben).
@@ -380,47 +629,65 @@ export function generateSchedule(input: GenerateInput): Shift[] {
     input.seed ??
     `${year}-${month}-${employees.map((e) => `${e.id}:${e.targetMinutes}`).join("|")}`;
 
-  const state: SchedulerState = {
-    dates,
-    rawTarget,
-    dateState,
-    worked,
-    weekendCount,
-    remaining,
-    shifts: [],
-    effKeyOf,
-    dayOf,
-    rng: seededRandom(seed),
-  };
-
   const employeesById = new Map(employees.map((e) => [e.id, e] as const));
-
-  // Rundenweise, rotierend platzieren: pro Runde eine Schicht je Mitarbeiter,
-  // bis jedes Monats-Soll exakt erreicht ist. Die Schichtlänge passt sich dem
-  // jeweiligen Tagesfenster an (z.B. kürzere Schicht an einem halben Tag).
   const ordered = orderedEmployees(employees);
   const n = ordered.length;
-  for (let round = 0; ; round++) {
-    if (ordered.every((e) => state.remaining.get(e.id)! <= 0)) break;
-    let progress = false;
-    for (let i = 0; i < n; i++) {
-      const emp = ordered[(i + round) % n];
-      if (state.remaining.get(emp.id)! <= 0) continue;
-      if (placeOneShift(state, emp)) progress = true;
+
+  /**
+   * Ein kompletter Belegungsversuch. varyLengths=true mischt die Schichtlängen
+   * (4..8 h statt immer die längste); das ist schöner, kann aber bei knappem
+   * Soll die Tage aufbrauchen. Deshalb gibt es den zweiten, strengen Versuch.
+   */
+  function attempt(varyLengths: boolean, salt = ""): SchedulerState {
+    shiftIdCounter = 0;
+    const st: SchedulerState = {
+      dates,
+      rawTarget,
+      dateState: new Map(dates.map((d) => [d, { totalPaid: 0, latePaid: 0, count: 0 }])),
+      worked: new Map(employees.map((e) => [e.id, new Set<string>()])),
+      weekendCount: new Map(employees.map((e) => [e.id, 0])),
+      remaining: new Map(employees.map((e) => [e.id, e.targetMinutes])),
+      shifts: [],
+      effKeyOf,
+      dayOf,
+      rng: seededRandom(seed + salt),
+      varyLengths,
+    };
+
+    // Rundenweise, rotierend platzieren: pro Runde eine Schicht je Mitarbeiter,
+    // bis jedes Monats-Soll exakt erreicht ist.
+    for (let round = 0; ; round++) {
+      if (ordered.every((e) => st.remaining.get(e.id)! <= 0)) break;
+      let progress = false;
+      for (let i = 0; i < n; i++) {
+        const emp = ordered[(i + round) % n];
+        if (st.remaining.get(emp.id)! <= 0) continue;
+        if (placeOneShift(st, emp)) progress = true;
+      }
+      if (!progress) break; // keine Platzierung mehr möglich
     }
-    if (!progress) break; // keine Platzierung mehr möglich
+    return st;
   }
+
+  const incomplete = (st: SchedulerState) =>
+    employees.some((e) => st.remaining.get(e.id)! > 0);
+
+  // Mehrere Anläufe mit gemischten Längen (jeweils anderer Zufallsstrom).
+  // Klappt keiner, wird streng die längste Schicht genommen – damit ist das
+  // Ergebnis nie schlechter als ohne Abwechslung.
+  let state = attempt(true);
+  for (let k = 1; k < 5 && incomplete(state); k++) {
+    state = attempt(true, `#${k}`);
+  }
+  if (incomplete(state)) state = attempt(false);
 
   const unmet = employees.filter((e) => state.remaining.get(e.id)! > 0);
   if (unmet.length > 0) {
-    throw new Error(
-      `Không đủ ngày mở cửa / giờ làm để đạt định mức cho: ` +
-        `${unmet.map((e) => `${e.name} (thiếu ${state.remaining.get(e.id)! / 60}h)`).join(", ")}. ` +
-        `Hãy tăng khung giờ làm hoặc giảm số ngày đóng cửa.`,
-    );
+    throw new Error(buildUnmetMessage(state, unmet, dates, dayOf));
   }
 
   repairDemand(state, employeesById);
+  balanceShiftTypes(state);
 
   // Stabil sortieren: nach Datum, dann Startzeit, dann Mitarbeiter.
   state.shifts.sort(
