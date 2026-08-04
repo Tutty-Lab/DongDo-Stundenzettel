@@ -1,7 +1,12 @@
 // ============================================================================
-// Gesetzliche Feiertage in Nordrhein-Westfalen (NRW) – der Shop liegt in
-// Gütersloh (33330), also NRW. Bewegliche Feiertage werden über die
-// Osterformel (Gauß/Computus) berechnet.
+// Gesetzliche Feiertage in Brandenburg – der Shop liegt in Herzfelde (15378),
+// also Brandenburg. Bewegliche Feiertage werden über die Osterformel
+// (Gauß/Computus) berechnet.
+//
+// Besonderheit Brandenburg (BbgFTG §1): Ostersonntag und Pfingstsonntag sind
+// hier gesetzliche Feiertage – anders als in den meisten Bundesländern.
+// Fronleichnam und Allerheiligen gibt es in Brandenburg NICHT, dafür den
+// Reformationstag (31.10.).
 // ============================================================================
 
 import { addDays, format } from "date-fns";
@@ -29,42 +34,30 @@ function iso(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
-/**
- * Alle gesetzlichen NRW-Feiertage eines Jahres als ISO-Set "yyyy-MM-dd".
- * Enthält die in NRW gültigen festen und beweglichen Feiertage.
- */
-export function nrwHolidays(year: number): Set<string> {
-  const easter = easterSunday(year);
-  const set = new Set<string>([
-    iso(new Date(year, 0, 1)), // Neujahr
-    iso(addDays(easter, -2)), // Karfreitag
-    iso(addDays(easter, 1)), // Ostermontag
-    iso(new Date(year, 4, 1)), // Tag der Arbeit (1. Mai)
-    iso(addDays(easter, 39)), // Christi Himmelfahrt
-    iso(addDays(easter, 50)), // Pfingstmontag
-    iso(addDays(easter, 60)), // Fronleichnam (NRW)
-    iso(new Date(year, 9, 3)), // Tag der Deutschen Einheit (3. Okt)
-    iso(new Date(year, 10, 1)), // Allerheiligen (NRW, 1. Nov)
-    iso(new Date(year, 11, 25)), // 1. Weihnachtstag
-    iso(new Date(year, 11, 26)), // 2. Weihnachtstag
-  ]);
-  return set;
-}
-
-/** Deutsche Namen der NRW-Feiertage (für Anzeige/Bemerkung). */
-export function nrwHolidayNames(year: number): Map<string, string> {
+/** Datum -> Name aller gesetzlichen Feiertage in Brandenburg eines Jahres. */
+export function brandenburgHolidayNames(year: number): Map<string, string> {
   const easter = easterSunday(year);
   const map = new Map<string, string>();
   map.set(iso(new Date(year, 0, 1)), "Neujahr");
   map.set(iso(addDays(easter, -2)), "Karfreitag");
+  map.set(iso(easter), "Ostersonntag"); // in Brandenburg gesetzlich
   map.set(iso(addDays(easter, 1)), "Ostermontag");
   map.set(iso(new Date(year, 4, 1)), "Tag der Arbeit");
   map.set(iso(addDays(easter, 39)), "Christi Himmelfahrt");
+  map.set(iso(addDays(easter, 49)), "Pfingstsonntag"); // in Brandenburg gesetzlich
   map.set(iso(addDays(easter, 50)), "Pfingstmontag");
-  map.set(iso(addDays(easter, 60)), "Fronleichnam");
   map.set(iso(new Date(year, 9, 3)), "Tag der Deutschen Einheit");
-  map.set(iso(new Date(year, 10, 1)), "Allerheiligen");
+  map.set(iso(new Date(year, 9, 31)), "Reformationstag"); // Brandenburg, 31.10.
   map.set(iso(new Date(year, 11, 25)), "1. Weihnachtstag");
   map.set(iso(new Date(year, 11, 26)), "2. Weihnachtstag");
   return map;
+}
+
+/**
+ * Alle gesetzlichen Feiertage Brandenburgs eines Jahres als ISO-Set
+ * "yyyy-MM-dd". Leitet sich aus brandenburgHolidayNames ab, damit Set und
+ * Namen niemals auseinanderlaufen können.
+ */
+export function brandenburgHolidays(year: number): Set<string> {
+  return new Set(brandenburgHolidayNames(year).keys());
 }

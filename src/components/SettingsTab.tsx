@@ -11,7 +11,7 @@ import {
   type WeekdayKey,
 } from "../lib/demand";
 import type { DayWindow, WorkHoursConfig } from "../lib/workHours";
-import { nrwHolidayNames } from "../lib/holidays";
+import { brandenburgHolidayNames } from "../lib/holidays";
 import { isoLabel } from "../lib/shiftOps";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -139,9 +139,9 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
     [schedule.dateOverrides],
   );
 
-  // Feiertage (NRW) im gewählten Monat.
+  // Feiertage (Brandenburg) im gewählten Monat.
   const holidaysThisMonth = useMemo(() => {
-    const names = nrwHolidayNames(schedule.year);
+    const names = brandenburgHolidayNames(schedule.year);
     const monthDates = new Set(datesOfMonth(schedule.year, schedule.month));
     return [...names.entries()]
       .filter(([iso]) => monthDates.has(iso))
@@ -219,7 +219,7 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
           <div className="my-2 border-t border-slate-200" />
           <WindowRow
             label="Ngày lễ"
-            hint="Tự áp dụng cho ngày lễ NRW"
+            hint="Tự áp dụng cho ngày lễ Brandenburg"
             window={schedule.workHours.holiday}
             onChange={setHolidayWindow}
           />
@@ -228,7 +228,7 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
         {holidaysThisMonth.length > 0 && (
           <div className="mt-3 rounded bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
             <div className="font-medium mb-1">
-              Ngày lễ NRW trong {MONTH_NAMES_VI[schedule.month - 1]} {schedule.year}:
+              Ngày lễ Brandenburg trong {MONTH_NAMES_VI[schedule.month - 1]} {schedule.year}:
             </div>
             <ul className="space-y-1">
               {holidaysThisMonth.map(([iso, name]) => {

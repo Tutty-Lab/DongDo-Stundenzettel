@@ -138,11 +138,17 @@ export function DocsTab() {
         <p className="text-slate-600">Độ dài ca cho phép: 4, 5, 6, 7, 8 giờ (không có ca dưới 4h).</p>
       </Section>
 
-      <Section title="4) Ngày lễ (tự phát hiện — bang NRW)">
+      <Section title="4) Ngày lễ (tự phát hiện — bang Brandenburg)">
         <p>
-          Ứng dụng tự tính <b>ngày lễ chính thức của NRW</b> (Gütersloh thuộc NRW) cho năm đang chọn,
-          gồm cả lễ cố định và lễ theo Phục Sinh. Ngày lễ được xử lý <b>như Chủ nhật</b> (nhu cầu + khung
-          giờ riêng, mặc định 11:30–22:00). Danh sách lễ trong tháng hiện ở tab <b>Cài đặt</b>.
+          Ứng dụng tự tính <b>ngày lễ chính thức của Brandenburg</b> (Herzfelde thuộc Brandenburg)
+          cho năm đang chọn, gồm cả lễ cố định và lễ theo Phục Sinh. Ngày lễ được xử lý{" "}
+          <b>như Chủ nhật</b> (nhu cầu + khung giờ riêng, mặc định 11:00–22:00). Danh sách lễ trong
+          tháng hiện ở tab <b>Cài đặt</b>.
+        </p>
+        <p className="mt-2">
+          Riêng Brandenburg có <b>Ostersonntag</b> và <b>Pfingstsonntag</b> là lễ chính thức (ít bang
+          nào có), và có <b>Reformationstag (31.10)</b>; ngược lại <b>không</b> có Fronleichnam và
+          Allerheiligen.
         </p>
       </Section>
 

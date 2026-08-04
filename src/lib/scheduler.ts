@@ -35,7 +35,7 @@ import {
   type OverrideMap,
   type WorkHoursConfig,
 } from "./workHours";
-import { nrwHolidays } from "./holidays";
+import { brandenburgHolidays } from "./holidays";
 
 export type GenerateInput = {
   year: number;
@@ -45,7 +45,7 @@ export type GenerateInput = {
   /** Ausnahmen für einzelne Daten (geschlossen / abweichende Zeiten). */
   overrides?: OverrideMap;
   employees: Employee[];
-  /** Feiertage als ISO-Set; Standard: NRW-Feiertage des Jahres. */
+  /** Feiertage als ISO-Set; Standard: Brandenburger Feiertage des Jahres. */
   holidays?: Set<string>;
   /** Optionaler Seed; sonst aus Eingabedaten abgeleitet. */
   seed?: string;
@@ -347,7 +347,7 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
 export function generateSchedule(input: GenerateInput): Shift[] {
   shiftIdCounter = 0;
   const { year, month, workHours, employees } = input;
-  const holidays = input.holidays ?? nrwHolidays(year);
+  const holidays = input.holidays ?? brandenburgHolidays(year);
   const overrides = input.overrides ?? {};
 
   const effKeyOf = (isoDate: string): WeekdayKey => effectiveWeekdayKey(isoDate, holidays);

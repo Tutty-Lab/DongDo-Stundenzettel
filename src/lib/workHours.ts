@@ -1,7 +1,7 @@
 // ============================================================================
 // Arbeitszeit-Fenster (giờ làm) je Wochentag + Feiertag. Das ist das Fenster,
 // in dem Schichten geplant werden dürfen (Früh am Fenster-Beginn, Spät am
-// Fenster-Ende). Feiertage (NRW) werden für Nachfrage & Spätquote wie Sonntag
+// Fenster-Ende). Feiertage (Brandenburg) werden für Nachfrage & Spätquote wie Sonntag
 // behandelt, verwenden aber ihr eigenes Zeitfenster.
 // ============================================================================
 

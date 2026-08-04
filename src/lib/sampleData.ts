@@ -29,7 +29,7 @@ export const SAMPLE_EMPLOYEES: Employee[] = [
 export function createSampleSchedule(): Schedule {
   return {
     companyName: "Muster Restaurant GmbH",
-    address: "Berliner Str. 61, 33330 Gütersloh",
+    address: "Hauptstrasse 24, 15378 Herzfelde",
     year: 2026,
     month: 8, // August
     workHours: structuredClone(DEFAULT_WORK_HOURS),
