@@ -4,6 +4,12 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  // Die Vercel-Integration von Supabase legt die öffentlichen Schlüssel unter
+  // NEXT_PUBLIC_* an (Next.js-Konvention). Dieses Projekt läuft auf Vite, das
+  // sonst nur VITE_* an den Browser durchreicht – daher beide Präfixe erlauben.
+  // Achtung: NEXT_PUBLIC_*/VITE_* landen im öffentlichen Bundle. Niemals
+  // Service-Role-Key oder Postgres-Passwort so benennen.
+  envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   plugins: [
     react(),
     VitePWA({

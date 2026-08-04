@@ -3,6 +3,12 @@ dist
 dist-ssr
 *.local
 .DS_Store
+
+# Zugangsdaten (Supabase/Postgres) – dürfen NIE ins Repository.
+.env
+.env.*
+!.env.example
+.vercel
 .vscode/*
 !.vscode/extensions.json
 .claude/

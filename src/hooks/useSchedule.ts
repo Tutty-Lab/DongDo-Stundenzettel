@@ -3,11 +3,12 @@
 // LocalStorage-Persistenz und alle Aktionen (Generieren, Bearbeiten, Reset).
 // ============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Employee, EmploymentType, Schedule, Shift } from "../types";
 import { generateSchedule } from "../lib/scheduler";
 import { validateSchedule, type ValidationResult } from "../lib/validation";
-import { clearState, loadState, saveState } from "../lib/storage";
+import { clearState, loadState, saveState, type PersistedState } from "../lib/storage";
+import { isRemoteConfigured, loadRemote, saveRemote, type RemoteStatus } from "../lib/remote";
 import { createManualShift, updateShiftTimes } from "../lib/shiftOps";
 import {
   DEFAULT_WORK_HOURS,
@@ -69,10 +70,61 @@ export function useSchedule() {
     return persisted?.originalShifts ?? [];
   });
   const [genError, setGenError] = useState<string | null>(null);
+  const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>(
+    isRemoteConfigured ? "idle" : "off",
+  );
 
-  // Automatisch speichern.
+  // Immer sofort lokal sichern – das ist der Offline-Puffer.
   useEffect(() => {
     saveState({ schedule, originalShifts });
+  }, [schedule, originalShifts]);
+
+  // Letzter Stand für Zugriffe außerhalb des Renders (siehe Erst-Upload).
+  const latest = useRef<PersistedState>({ schedule, originalShifts });
+  useEffect(() => {
+    latest.current = { schedule, originalShifts };
+  }, [schedule, originalShifts]);
+
+  // Beim Start den Stand der Filiale aus der gemeinsamen Datenbank holen.
+  // Vorher darf nicht hochgeladen werden, sonst überschreibt der lokale
+  // (evtl. leere) Stand die Daten in der Datenbank.
+  const hydrated = useRef(!isRemoteConfigured);
+  useEffect(() => {
+    if (!isRemoteConfigured) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await loadRemote();
+        if (cancelled) return;
+        if (remote?.schedule) {
+          setSchedule(normalizeSchedule(remote.schedule));
+          setOriginalShifts(remote.originalShifts ?? []);
+        } else {
+          // Noch keine Zeile für diese Filiale: lokalen Stand hochladen.
+          await saveRemote(latest.current);
+        }
+        if (!cancelled) setRemoteStatus("idle");
+      } catch {
+        if (!cancelled) setRemoteStatus("error");
+      } finally {
+        if (!cancelled) hydrated.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Änderungen gebündelt hochladen (nicht bei jedem Tastendruck).
+  useEffect(() => {
+    if (!isRemoteConfigured || !hydrated.current) return;
+    const timer = window.setTimeout(() => {
+      setRemoteStatus("saving");
+      saveRemote({ schedule, originalShifts })
+        .then(() => setRemoteStatus("idle"))
+        .catch(() => setRemoteStatus("error"));
+    }, 1000);
+    return () => window.clearTimeout(timer);
   }, [schedule, originalShifts]);
 
   const validation: ValidationResult = useMemo(
@@ -243,6 +295,8 @@ export function useSchedule() {
     generate,
     resetToOriginal,
     resetAll,
+    remoteStatus,
+    isRemoteConfigured,
     saveNow,
     upsertOverride,
     removeOverride,

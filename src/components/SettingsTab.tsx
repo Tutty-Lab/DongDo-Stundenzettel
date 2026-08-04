@@ -371,6 +371,7 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
           <p className="mt-3 text-xs text-slate-400">Chưa có ngày đặc biệt nào.</p>
         )}
       </section>
+
     </div>
   );
 }

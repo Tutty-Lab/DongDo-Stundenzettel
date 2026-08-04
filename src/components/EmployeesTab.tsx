@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { EmploymentType } from "../types";
 import { splitTargetHours } from "../lib/splitTargetHours";
@@ -17,31 +17,10 @@ function splitInfo(targetHours: number, type: EmploymentType): { ok: boolean; te
 }
 
 export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
-  const { schedule, addEmployee, updateEmployee, removeEmployee, saveNow } = store;
+  const { schedule, addEmployee, updateEmployee, removeEmployee } = store;
   const [name, setName] = useState("");
   const [type, setType] = useState<EmploymentType>("VOLLZEIT");
   const [hours, setHours] = useState(176);
-
-  // Welche Zeile zeigt gerade „Đã lưu"? Der Hinweis verschwindet nach 2 s.
-  const [savedId, setSavedId] = useState<string | null>(null);
-  const savedTimer = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
-    };
-  }, []);
-
-  /**
-   * Änderungen werden ohnehin bei jedem Tastendruck gespeichert – der Knopf
-   * schreibt sofort in den Speicher und bestätigt es sichtbar.
-   */
-  function handleSave(id: string) {
-    saveNow();
-    setSavedId(id);
-    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
-    savedTimer.current = window.setTimeout(() => setSavedId(null), 2000);
-  }
 
   return (
     <section className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
@@ -146,27 +125,29 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
                     <span className="text-slate-400">h</span>
                   </div>
                 </label>
-                <div className="flex items-center justify-between sm:flex-col sm:items-end sm:justify-end gap-1 sm:w-32">
+                <label className="flex items-center gap-2 sm:pb-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={emp.saved === true}
+                    onChange={(e) => updateEmployee(emp.id, { saved: e.target.checked })}
+                    className="h-5 w-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span
+                    className={`text-sm ${emp.saved ? "text-emerald-700 font-medium" : "text-slate-500"}`}
+                  >
+                    Lưu
+                  </span>
+                </label>
+                <div className="flex items-center justify-between sm:flex-col sm:items-end sm:justify-end gap-1 sm:w-24">
                   <span className={`text-xs ${info.ok ? "text-slate-500" : "text-rose-600"}`}>
                     {info.text}
                   </span>
-                  <div className="flex items-center gap-3">
-                    {savedId === emp.id && (
-                      <span className="text-xs text-emerald-600">Đã lưu</span>
-                    )}
-                    <button
-                      onClick={() => handleSave(emp.id)}
-                      className="text-slate-700 hover:text-slate-900 text-sm font-medium"
-                    >
-                      Lưu
-                    </button>
-                    <button
-                      onClick={() => removeEmployee(emp.id)}
-                      className="text-rose-600 hover:text-rose-800 text-sm font-medium"
-                    >
-                      Xoá
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => removeEmployee(emp.id)}
+                    className="text-rose-600 hover:text-rose-800 text-sm font-medium"
+                  >
+                    Xoá
+                  </button>
                 </div>
               </div>
             );
