@@ -15,33 +15,34 @@ export type WeekdayKey =
 
 /**
  * Nachfrage-Gewichte je Wochentag (keine Mitarbeiterzahlen!).
- * Laut Chef sind genau Fr/Sa/So die vollen Tage – etwa doppelt so stark wie
- * ein ruhiger Wochentag. Mo–Do liegen deshalb alle bei 1,0; ein früher
- * angenommener Donnerstags-Zuschlag war nicht belegt und wurde entfernt.
+ * Vorgabe des Chefs (Dong Do Imbiss): die vollen Tage sind Di–Sa. Montag ist
+ * ruhig, Sonntag ist geschlossen (siehe closedWeekdays in workHours). Das
+ * Gewicht steuert nur, wie viele Stunden ein offener Tag bekommt.
  */
 export const DAY_WEIGHTS: Record<WeekdayKey, number> = {
-  monday: 1.0,
-  tuesday: 1.0,
-  wednesday: 1.0,
-  thursday: 1.0,
+  monday: 1.0, // ruhig
+  tuesday: 1.6,
+  wednesday: 1.6,
+  thursday: 1.7,
   friday: 1.8,
-  saturday: 2.0,
-  sunday: 1.6,
+  saturday: 1.7,
+  sunday: 1.0, // geschlossen (Gewicht nur relevant, falls doch geöffnet)
 };
 
 /**
  * Gewünschter Anteil an Spätschicht-Stunden je Wochentag.
- * Basis laut Chef: der Abend macht rund 2/3 des Umsatzes aus -> 0,67 an den
- * ruhigen Tagen. Fr/Sa/So liegen darüber, weil dort abends noch mehr los ist.
+ * Dong Do ist ein Imbiss (10–20 Uhr) in einem Büro-/Gewerbegebiet: das
+ * Mittagsgeschäft trägt den Tag, der Abend endet früh (20 Uhr). Deshalb liegt
+ * der Spätanteil bewusst UNTER der Hälfte – die Mittagsspitze ist die größere.
  */
 export const LATE_SHIFT_RATIOS: Record<WeekdayKey, number> = {
-  monday: 0.67,
-  tuesday: 0.67,
-  wednesday: 0.67,
-  thursday: 0.67,
-  friday: 0.72,
-  saturday: 0.74,
-  sunday: 0.85,
+  monday: 0.45,
+  tuesday: 0.45,
+  wednesday: 0.45,
+  thursday: 0.45,
+  friday: 0.48,
+  saturday: 0.5,
+  sunday: 0.45,
 };
 
 /** date-fns getDay(): 0=So ... 6=Sa  ->  WeekdayKey. */

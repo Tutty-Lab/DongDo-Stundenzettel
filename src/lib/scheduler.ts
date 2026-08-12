@@ -35,7 +35,7 @@ import {
   type OverrideMap,
   type WorkHoursConfig,
 } from "./workHours";
-import { brandenburgHolidays } from "./holidays";
+import { publicHolidays } from "./holidays";
 
 export type GenerateInput = {
   year: number;
@@ -45,7 +45,7 @@ export type GenerateInput = {
   /** Ausnahmen für einzelne Daten (geschlossen / abweichende Zeiten). */
   overrides?: OverrideMap;
   employees: Employee[];
-  /** Feiertage als ISO-Set; Standard: Brandenburger Feiertage des Jahres. */
+  /** Feiertage als ISO-Set; Standard: Rheinland-Pfalz-Feiertage des Jahres. */
   holidays?: Set<string>;
   /** Optionaler Seed; sonst aus Eingabedaten abgeleitet. */
   seed?: string;
@@ -90,19 +90,43 @@ function isWeekend(isoDate: string): boolean {
   return key === "friday" || key === "saturday";
 }
 
-const SHIFT_HOURS_DESC = [8, 7, 6, 5, 4] as const;
+const SHIFT_HOURS_DESC = [8, 7, 6, 5, 4, 3] as const;
 
 /**
  * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs):
- * Vollzeit 6/7/8 h, Teilzeit die volle Bandbreite 4..8 h.
+ * Vollzeit macht lange Schichten (6/7/8 h), Teilzeit die volle Bandbreite
+ * 3..8 h. Kurze 3-h-Schichten sind bei Dong Do ausdrücklich erlaubt.
  */
 const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
   VOLLZEIT: [6, 7, 8],
-  TEILZEIT: [4, 5, 6, 7, 8],
+  TEILZEIT: [3, 4, 5, 6, 7, 8],
 };
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
-const ALL_HOURS: readonly number[] = [4, 5, 6, 7, 8];
+const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8];
+
+// ── Stoßzeiten (peak windows) ───────────────────────────────────────────────
+// Zwei Spitzen wie in einem echten Restaurant: mittags und abends. Der Abend
+// ist die stärkere Spitze. Die Werte sind Messpunkte "mitten in der Spitze".
+const LUNCH_PROBE = 12 * 60 + 30; // 12:30
+
+/** Wie viele Leute sind zum Zeitpunkt `t` anwesend (Anwesenheit inkl. Pause)? */
+function coverageAt(shifts: Shift[], t: number): number {
+  let n = 0;
+  for (const s of shifts) if (s.startMinutes <= t && s.endMinutes > t) n++;
+  return n;
+}
+
+/**
+ * Ziel-Mindestbesetzung der Mittagsspitze abhängig von der Tagesgröße `n`
+ * (Anzahl Schichten an dem Tag). Ruhige Tage: eine Person sperrt auf und deckt
+ * den Mittag; volle Tage (Fr/Sa/So) sollen auch mittags ein Team haben – der
+ * Abend bleibt trotzdem die stärkere Spitze (siehe Prüfung beim Drehen).
+ */
+function lunchTargetFor(n: number): number {
+  const goal = n >= 6 ? 3 : n >= 4 ? 2 : 1;
+  return Math.min(goal, n - 1); // Abend kann so immer >= Mittag bleiben
+}
 
 /**
  * Lässt sich `hours` restlos in Schichten aus `allowed` zerlegen?
@@ -164,7 +188,7 @@ export function chooseShiftHours(
 ): number {
   const remainingHours = remainingMinutes / 60;
   const cap = Math.min(8, maxHours, remainingHours);
-  if (cap < 4) return 0;
+  if (cap < 3) return 0;
 
   // Erlaubte Längen je Anstellungsart (Vorgabe des Chefs): Vollzeit macht keine
   // Kurzschichten, Teilzeit darf die ganze Bandbreite.
@@ -488,6 +512,43 @@ function balanceShiftTypes(state: SchedulerState): void {
       retypeShift(state, best, best.shiftType === "LATE" ? "EARLY" : "LATE");
     }
 
+    // 1b. Mittagsspitze absichern. Ohne diesen Schritt entstand ein reiner
+    //     Anstieg über den Tag – mittags stand nur eine Person im Laden, alle
+    //     anderen kamen erst nachmittags/abends. Ein echter Plan hat auch
+    //     mittags ein Team. Wir drehen dazu die LÄNGSTEN Spätschichten auf Früh:
+    //     als Frühschicht decken sie den Mittag ab und reichen (8 h => 11–20)
+    //     weiterhin bis in die Abendspitze, sodass der Abend die stärkere
+    //     Spitze bleibt. Gedreht wird nur der Typ, nie die Dauer => Soll exakt.
+    const lunchInWindow =
+      day.window.startMinutes <= LUNCH_PROBE && day.window.endMinutes > LUNCH_PROBE;
+    if (lunchInWindow && onDay.length >= 3) {
+      const lunchGoal = lunchTargetFor(onDay.length);
+      for (let guard = 0; guard < onDay.length; guard++) {
+        if (coverageAt(onDay, LUNCH_PROBE) >= lunchGoal) break;
+        const candidates = onDay
+          .filter(
+            (s) =>
+              s.shiftType === "LATE" &&
+              !(s.startMinutes <= LUNCH_PROBE && s.endMinutes > LUNCH_PROBE),
+          )
+          .sort((a, b) => b.paidMinutes - a.paidMinutes); // längste zuerst
+        let flipped = false;
+        for (const c of candidates) {
+          retypeShift(state, c, "EARLY");
+          const stillCloses = onDay.some((s) => s.endMinutes === day.window.endMinutes);
+          // Nur behalten, wenn weiterhin jemand bis zum Schließen bleibt.
+          // (Dong Do ist mittagslastig – der Mittag darf ruhig die stärkere
+          // Spitze sein; wir müssen den Abend nicht künstlich größer halten.)
+          if (stillCloses) {
+            flipped = true;
+            break;
+          }
+          retypeShift(state, c, "LATE");
+        }
+        if (!flipped) break;
+      }
+    }
+
     // 2. Öffnen/Schließen sichern. Mit nur einer Schicht am Tag geht beides
     //    nicht – dann bleibt es bei der Quote-Entscheidung.
     if (onDay.length < 2) continue;
@@ -596,7 +657,7 @@ function buildUnmetMessage(
 export function generateSchedule(input: GenerateInput): Shift[] {
   shiftIdCounter = 0;
   const { year, month, workHours, employees } = input;
-  const holidays = input.holidays ?? brandenburgHolidays(year);
+  const holidays = input.holidays ?? publicHolidays(year);
   const overrides = input.overrides ?? {};
 
   const effKeyOf = (isoDate: string): WeekdayKey => effectiveWeekdayKey(isoDate, holidays);

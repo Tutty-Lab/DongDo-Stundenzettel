@@ -28,8 +28,8 @@ export const SAMPLE_EMPLOYEES: Employee[] = [
 
 export function createSampleSchedule(): Schedule {
   return {
-    companyName: "Muster Restaurant GmbH",
-    address: "Hauptstrasse 24, 15378 Herzfelde",
+    companyName: "Dong Do Imbiss",
+    address: "Johannes-Kepler-Str. 15, 55129 Mainz",
     year: 2026,
     month: 8, // August
     workHours: structuredClone(DEFAULT_WORK_HOURS),

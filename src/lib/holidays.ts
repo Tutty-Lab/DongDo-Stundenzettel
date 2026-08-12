@@ -1,12 +1,12 @@
 // ============================================================================
-// Gesetzliche Feiertage in Brandenburg – der Shop liegt in Herzfelde (15378),
-// also Brandenburg. Bewegliche Feiertage werden über die Osterformel
+// Gesetzliche Feiertage in Rheinland-Pfalz – der Laden liegt in Mainz (55129),
+// also Rheinland-Pfalz. Bewegliche Feiertage werden über die Osterformel
 // (Gauß/Computus) berechnet.
 //
-// Besonderheit Brandenburg (BbgFTG §1): Ostersonntag und Pfingstsonntag sind
-// hier gesetzliche Feiertage – anders als in den meisten Bundesländern.
-// Fronleichnam und Allerheiligen gibt es in Brandenburg NICHT, dafür den
-// Reformationstag (31.10.).
+// Besonderheit Rheinland-Pfalz (LFtG): katholisch geprägt – es gelten
+// Fronleichnam und Allerheiligen. KEINE gesetzlichen Feiertage sind hier
+// Ostersonntag/Pfingstsonntag (nur in Brandenburg) und der Reformationstag
+// (nur in den ostdeutschen Ländern).
 // ============================================================================
 
 import { addDays, format } from "date-fns";
@@ -34,30 +34,29 @@ function iso(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
-/** Datum -> Name aller gesetzlichen Feiertage in Brandenburg eines Jahres. */
-export function brandenburgHolidayNames(year: number): Map<string, string> {
+/** Datum -> Name aller gesetzlichen Feiertage in Rheinland-Pfalz eines Jahres. */
+export function publicHolidayNames(year: number): Map<string, string> {
   const easter = easterSunday(year);
   const map = new Map<string, string>();
   map.set(iso(new Date(year, 0, 1)), "Neujahr");
   map.set(iso(addDays(easter, -2)), "Karfreitag");
-  map.set(iso(easter), "Ostersonntag"); // in Brandenburg gesetzlich
   map.set(iso(addDays(easter, 1)), "Ostermontag");
   map.set(iso(new Date(year, 4, 1)), "Tag der Arbeit");
   map.set(iso(addDays(easter, 39)), "Christi Himmelfahrt");
-  map.set(iso(addDays(easter, 49)), "Pfingstsonntag"); // in Brandenburg gesetzlich
   map.set(iso(addDays(easter, 50)), "Pfingstmontag");
+  map.set(iso(addDays(easter, 60)), "Fronleichnam"); // Rheinland-Pfalz
   map.set(iso(new Date(year, 9, 3)), "Tag der Deutschen Einheit");
-  map.set(iso(new Date(year, 9, 31)), "Reformationstag"); // Brandenburg, 31.10.
+  map.set(iso(new Date(year, 10, 1)), "Allerheiligen"); // Rheinland-Pfalz, 01.11.
   map.set(iso(new Date(year, 11, 25)), "1. Weihnachtstag");
   map.set(iso(new Date(year, 11, 26)), "2. Weihnachtstag");
   return map;
 }
 
 /**
- * Alle gesetzlichen Feiertage Brandenburgs eines Jahres als ISO-Set
- * "yyyy-MM-dd". Leitet sich aus brandenburgHolidayNames ab, damit Set und
- * Namen niemals auseinanderlaufen können.
+ * Alle gesetzlichen Feiertage in Rheinland-Pfalz eines Jahres als ISO-Set
+ * "yyyy-MM-dd". Leitet sich aus publicHolidayNames ab, damit Set und Namen
+ * niemals auseinanderlaufen können.
  */
-export function brandenburgHolidays(year: number): Set<string> {
-  return new Set(brandenburgHolidayNames(year).keys());
+export function publicHolidays(year: number): Set<string> {
+  return new Set(publicHolidayNames(year).keys());
 }

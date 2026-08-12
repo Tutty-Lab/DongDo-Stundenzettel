@@ -28,33 +28,25 @@ describe("timeToMinutes / minutesToTime", () => {
 });
 
 describe("calculatePause", () => {
-  it("0 Minuten unter 6 h", () => {
-    expect(calculatePause(4 * 60)).toBe(0);
-    expect(calculatePause(5 * 60)).toBe(0);
-    expect(calculatePause(6 * 60 - 1)).toBe(0);
-  });
-  it("30 Minuten bei 6 h und 7 h", () => {
-    expect(calculatePause(6 * 60)).toBe(30);
-    expect(calculatePause(7 * 60)).toBe(30);
-    expect(calculatePause(8 * 60 - 1)).toBe(30);
-  });
-  it("60 Minuten ab 8 h", () => {
-    expect(calculatePause(8 * 60)).toBe(60);
+  it("immer 0 – Dong Do zieht keine Pause ab", () => {
+    expect(calculatePause(3 * 60)).toBe(0);
+    expect(calculatePause(6 * 60)).toBe(0);
+    expect(calculatePause(7 * 60)).toBe(0);
+    expect(calculatePause(8 * 60)).toBe(0);
   });
 });
 
 describe("calculatePaidMinutes / presenceFromPaid", () => {
   it("berechnet bezahlte Minuten aus Beginn/Ende/Pause", () => {
-    // 13:00-22:00, Pause 60 => 8 h
-    expect(calculatePaidMinutes(780, 1320, 60)).toBe(480);
-    // 18:00-22:00, Pause 0 => 4 h
-    expect(calculatePaidMinutes(1080, 1320, 0)).toBe(240);
+    // 12:00-20:00, keine Pause => 8 h
+    expect(calculatePaidMinutes(720, 1200, 0)).toBe(480);
+    // 16:00-20:00, keine Pause => 4 h
+    expect(calculatePaidMinutes(960, 1200, 0)).toBe(240);
   });
-  it("presence = paid + pause", () => {
-    expect(presenceFromPaid(480)).toBe(540); // 8h + 60
-    expect(presenceFromPaid(240)).toBe(240); // 4h + 0
-    expect(presenceFromPaid(360)).toBe(390); // 6h + 30
-    expect(presenceFromPaid(420)).toBe(450); // 7h + 30
+  it("presence = paid (keine Pause)", () => {
+    expect(presenceFromPaid(480)).toBe(480); // 8h
+    expect(presenceFromPaid(240)).toBe(240); // 4h
+    expect(presenceFromPaid(180)).toBe(180); // 3h
   });
 });
 

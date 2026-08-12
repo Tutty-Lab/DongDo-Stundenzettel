@@ -8,7 +8,7 @@ import {
 import { minutesToDecimalHours, minutesToTime } from "../lib/time";
 import { signedHours } from "../lib/dateFormat";
 import { MONTH_NAMES_DE } from "../lib/dateFormat";
-import { brandenburgHolidayNames } from "../lib/holidays";
+import { publicHolidayNames } from "../lib/holidays";
 import { format } from "date-fns";
 
 // Deutscher Monats-Titel für das offizielle Dokument.
@@ -35,7 +35,7 @@ export function StundenzettelPage({
 
   const totalMinutes = [...byDate.values()].reduce((a, s) => a + s.paidMinutes, 0);
   const diff = totalMinutes - employee.targetMinutes;
-  const holidayNames = brandenburgHolidayNames(schedule.year);
+  const holidayNames = publicHolidayNames(schedule.year);
   const closedByDate = new Map(
     schedule.dateOverrides.filter((o) => o.closed).map((o) => [o.date, o] as const),
   );

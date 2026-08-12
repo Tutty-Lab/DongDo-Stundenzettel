@@ -90,7 +90,7 @@ export function DocsTab() {
             Mỗi người phải đạt <b>đúng định mức tháng</b> (Sollstunden) — không thừa, không thiếu.
           </li>
           <li>
-            <b>Giờ nghỉ (Pause) không tính</b> vào định mức: dưới 6h công = 0 phút, ca 6h và 7h = 30 phút, từ 8h trở lên = 60 phút.
+            <b>Không có giờ nghỉ (Pause)</b> trong ngày — giờ có mặt = giờ công (theo yêu cầu của quán).
           </li>
         </ul>
       </Section>
@@ -108,24 +108,25 @@ export function DocsTab() {
         <p className="text-slate-600">
           Công thức mỗi ngày: <code>giờ ngày = tổng giờ tháng × trọng số ngày ÷ tổng trọng số</code>.
           <br />
-          <b>Thứ 6, Thứ 7, Chủ nhật</b> đông hơn hẳn ngày thường (Thứ 2–Thứ 4). Ngày{" "}
-          <b>đóng cửa</b> có trọng số 0 (không xếp giờ, giờ dồn sang ngày khác).
+          <b>Thứ 3 → Thứ 7</b> là những ngày đông; <b>Thứ 2</b> vắng hơn và <b>Chủ nhật đóng cửa</b>.
+          Ngày <b>đóng cửa</b> có trọng số 0 (không xếp giờ, giờ dồn sang ngày khác).
         </p>
       </Section>
 
       <Section title="2) Tỉ lệ ca tối vs ca sáng">
         <p>
           Với số giờ đã chia cho mỗi ngày, phần trăm dưới đây là <b>tỉ lệ giờ dành cho ca tối</b> (phần
-          còn lại là ca sáng). <b>Tối luôn đông hơn sáng</b> (đều trên 50%), cuối tuần và Chủ nhật đậm hơn.
+          còn lại là ca sáng). Dong Do là quán ăn mở <b>10:00–20:00</b> ở khu văn phòng nên{" "}
+          <b>buổi trưa là cao điểm lớn hơn</b> — ca tối dưới 50%.
         </p>
         <WeekdayTable
           values={LATE_SHIFT_RATIOS}
           format={(v) => Math.round(v * 100) + "%"}
-          highlight={(k) => LATE_SHIFT_RATIOS[k] >= 0.7}
+          highlight={(k) => LATE_SHIFT_RATIOS[k] >= 0.5}
         />
         <p className="text-slate-600">
-          Ngoài ra: Teilzeit (bán thời gian) thiên về ca tối; Vollzeit (toàn thời gian) cân bằng
-          sáng/tối; Chủ nhật &amp; ngày lễ dồn mạnh vào buổi tối.
+          App luôn bảo đảm <b>hai khung cao điểm</b>: trưa (12:30) và tối (18:30). Ngày đông (Thứ 3–7)
+          có <b>đội trưa ≥ 2 người</b>; luôn có người mở cửa lúc 10:00 và người đóng cửa lúc 20:00.
         </p>
       </Section>
 
@@ -135,20 +136,19 @@ export function DocsTab() {
           <b>ngắn hơn</b> (VD nửa buổi), ca sẽ <b>tự co ngắn lại</b> cho vừa khung — kể cả nhân viên toàn
           thời gian vẫn đi làm ca ngắn hôm đó, và <b>định mức tháng vẫn được bù đủ</b> ở các ngày khác.
         </p>
-        <p className="text-slate-600">Độ dài ca cho phép: 4, 5, 6, 7, 8 giờ (không có ca dưới 4h).</p>
+        <p className="text-slate-600">Độ dài ca cho phép: 3, 4, 5, 6, 7, 8 giờ.</p>
       </Section>
 
-      <Section title="4) Ngày lễ (tự phát hiện — bang Brandenburg)">
+      <Section title="4) Ngày lễ (tự phát hiện — bang Rheinland-Pfalz)">
         <p>
-          Ứng dụng tự tính <b>ngày lễ chính thức của Brandenburg</b> (Herzfelde thuộc Brandenburg)
+          Ứng dụng tự tính <b>ngày lễ chính thức của Rheinland-Pfalz</b> (Mainz thuộc Rheinland-Pfalz)
           cho năm đang chọn, gồm cả lễ cố định và lễ theo Phục Sinh. Ngày lễ được xử lý{" "}
-          <b>như Chủ nhật</b> (nhu cầu + khung giờ riêng, mặc định 11:00–22:00). Danh sách lễ trong
-          tháng hiện ở tab <b>Cài đặt</b>.
+          <b>như Chủ nhật</b> (nhu cầu + khung giờ riêng). Danh sách lễ trong tháng hiện ở tab{" "}
+          <b>Cài đặt</b>.
         </p>
         <p className="mt-2">
-          Riêng Brandenburg có <b>Ostersonntag</b> và <b>Pfingstsonntag</b> là lễ chính thức (ít bang
-          nào có), và có <b>Reformationstag (31.10)</b>; ngược lại <b>không</b> có Fronleichnam và
-          Allerheiligen.
+          Rheinland-Pfalz theo Công giáo nên có <b>Fronleichnam</b> và <b>Allerheiligen (1.11)</b>;
+          ngược lại <b>không</b> có Ostersonntag/Pfingstsonntag hay Reformationstag.
         </p>
       </Section>
 

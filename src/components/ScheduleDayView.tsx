@@ -10,7 +10,8 @@ import {
 } from "../lib/demand";
 import { minutesToShortHours, minutesToTime } from "../lib/time";
 import { isoLabel } from "../lib/shiftOps";
-import { brandenburgHolidayNames } from "../lib/holidays";
+import { publicHolidayNames, publicHolidays } from "../lib/holidays";
+import { isDayClosed } from "../lib/workHours";
 import { format } from "date-fns";
 
 /** Chế độ xem theo từng ngày – tối ưu cho điện thoại (không cuộn ngang). */
@@ -26,11 +27,18 @@ export function ScheduleDayView({
     () => datesOfMonth(schedule.year, schedule.month),
     [schedule.year, schedule.month],
   );
-  const holidayNames = useMemo(() => brandenburgHolidayNames(schedule.year), [schedule.year]);
+  const holidayNames = useMemo(() => publicHolidayNames(schedule.year), [schedule.year]);
   const overridesByDate = useMemo(
     () => new Map(schedule.dateOverrides.map((o) => [o.date, o] as const)),
     [schedule.dateOverrides],
   );
+  const closedByDate = useMemo(() => {
+    const holidays = publicHolidays(schedule.year);
+    const ovMap = Object.fromEntries(schedule.dateOverrides.map((o) => [o.date, o]));
+    const set = new Set<string>();
+    for (const d of dates) if (isDayClosed(schedule.workHours, d, holidays, ovMap)) set.add(d);
+    return set;
+  }, [dates, schedule.workHours, schedule.year, schedule.dateOverrides]);
 
   const today = format(new Date(), "yyyy-MM-dd");
   const [selected, setSelected] = useState<string>(() =>
@@ -73,7 +81,7 @@ export function ScheduleDayView({
     const o = overridesByDate.get(iso);
     const isSel = iso === selected;
     if (isSel) return "bg-slate-900 text-white border-slate-900";
-    if (o?.closed) return "bg-rose-50 text-rose-700 border-rose-200";
+    if (closedByDate.has(iso)) return "bg-rose-50 text-rose-700 border-rose-200";
     if (o) return "bg-sky-50 text-sky-700 border-sky-200";
     const k = weekdayKeyOf(parseIsoDate(iso));
     if (k === "saturday" || k === "sunday") return "bg-slate-100 text-slate-700 border-slate-200";
@@ -106,7 +114,7 @@ export function ScheduleDayView({
         <h3 className="text-base font-semibold text-slate-900">
           {WEEKDAY_LABELS_VI[weekdayKey]}, {isoLabel(selected)}
         </h3>
-        {ov?.closed && (
+        {closedByDate.has(selected) && (
           <span className="rounded-full bg-rose-100 text-rose-700 text-xs px-2 py-0.5 font-medium">
             Đóng cửa
           </span>

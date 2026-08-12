@@ -10,6 +10,8 @@ import {
 import { minutesToShortHours, minutesToTime } from "../lib/time";
 import { signedHours } from "../lib/dateFormat";
 import { monthLabel } from "../lib/shiftOps";
+import { isDayClosed } from "../lib/workHours";
+import { publicHolidays } from "../lib/holidays";
 import { ShiftCellEditor } from "./ShiftCellEditor";
 import { ScheduleDayView } from "./ScheduleDayView";
 
@@ -53,6 +55,17 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
     () => new Map(schedule.dateOverrides.map((o) => [o.date, o] as const)),
     [schedule.dateOverrides],
   );
+
+  // Geschlossene Tage (Sonntag + Feiertag-Overrides + Betriebsruhe) vorab.
+  const closedByDate = useMemo(() => {
+    const holidays = publicHolidays(schedule.year);
+    const ovMap = Object.fromEntries(schedule.dateOverrides.map((o) => [o.date, o]));
+    const set = new Set<string>();
+    for (const d of dates) {
+      if (isDayClosed(schedule.workHours, d, holidays, ovMap)) set.add(d);
+    }
+    return set;
+  }, [dates, schedule.workHours, schedule.year, schedule.dateOverrides]);
 
   // Tổng theo ngày cho các dòng chân bảng.
   const dayStats = useMemo(() => {
@@ -163,7 +176,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                   const day = parseIsoDate(d).getDate();
                   const wk = WEEKDAY_SHORT_VI[weekdayKeyOf(parseIsoDate(d))];
                   const ov = overridesByDate.get(d);
-                  const headerBg = ov?.closed
+                  const closed = closedByDate.has(d);
+                  const headerBg = closed
                     ? "bg-rose-100"
                     : ov
                       ? "bg-sky-100"
@@ -174,8 +188,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                     <th
                       key={d}
                       title={
-                        ov?.closed
-                          ? `Đóng cửa${ov.note ? " · " + ov.note : ""}`
+                        closed
+                          ? `Đóng cửa${ov?.note ? " · " + ov.note : ""}`
                           : ov
                             ? `Giờ riêng${ov.note ? " · " + ov.note : ""}`
                             : undefined
@@ -184,8 +198,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                     >
                       <div className="font-semibold">{day}</div>
                       <div className="text-[10px] text-slate-500">{wk}</div>
-                      {ov?.closed && <div className="text-[9px] text-rose-600 font-medium">Đóng cửa</div>}
-                      {ov && !ov.closed && <div className="text-[9px] text-sky-700 font-medium">Giờ riêng</div>}
+                      {closed && <div className="text-[9px] text-rose-600 font-medium">Đóng cửa</div>}
+                      {!closed && ov && <div className="text-[9px] text-sky-700 font-medium">Giờ riêng</div>}
                     </th>
                   );
                 })}

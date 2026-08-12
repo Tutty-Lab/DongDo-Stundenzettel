@@ -7,24 +7,24 @@ function sum(arr: number[]): number {
 
 describe("splitTargetHours – Vollzeit", () => {
   it("summiert immer exakt auf das Ziel", () => {
-    for (let h = 4; h <= 200; h++) {
+    for (let h = 3; h <= 200; h++) {
       const parts = splitTargetHours(h, "VOLLZEIT");
       expect(sum(parts)).toBe(h);
-      for (const p of parts) expect(p).toBeGreaterThanOrEqual(4);
+      for (const p of parts) expect(p).toBeGreaterThanOrEqual(3);
       for (const p of parts) expect(p).toBeLessThanOrEqual(8);
     }
   });
 
-  it("bevorzugt 8-h-Schichten (Beispiele aus der Spezifikation)", () => {
+  it("bevorzugt 8-h-Schichten (möglichst viele 8er)", () => {
     expect(splitTargetHours(176, "VOLLZEIT")).toEqual(Array(22).fill(8));
     // 180 = 22×8 + 4
     expect(splitTargetHours(180, "VOLLZEIT").filter((x) => x === 8).length).toBe(22);
     expect(sum(splitTargetHours(180, "VOLLZEIT"))).toBe(180);
-    // 179 = 21×8 + 7 + 4
+    // 179 = 22×8 + 3 (mit 3-h-Schichten sind mehr 8er möglich)
     const s179 = splitTargetHours(179, "VOLLZEIT");
-    expect(s179.filter((x) => x === 8).length).toBe(21);
+    expect(s179.filter((x) => x === 8).length).toBe(22);
     expect(sum(s179)).toBe(179);
-    // 178 = 21×8 + 6 + 4
+    // 178 = 21×8 + 7 + 3
     const s178 = splitTargetHours(178, "VOLLZEIT");
     expect(s178.filter((x) => x === 8).length).toBe(21);
     expect(sum(s178)).toBe(178);
@@ -50,9 +50,11 @@ describe("splitTargetHours – Teilzeit", () => {
 });
 
 describe("splitTargetHours – Fehlerfälle", () => {
-  it("wirft bei nicht darstellbaren Zielen", () => {
+  it("wirft bei nicht darstellbaren Zielen (1 und 2 h)", () => {
     expect(() => splitTargetHours(1, "VOLLZEIT")).toThrow();
-    expect(() => splitTargetHours(3, "TEILZEIT")).toThrow();
+    expect(() => splitTargetHours(2, "TEILZEIT")).toThrow();
+    // 3 h ist jetzt darstellbar (eine 3-h-Schicht).
+    expect(splitTargetHours(3, "TEILZEIT")).toEqual([3]);
   });
   it("0 => leere Liste", () => {
     expect(splitTargetHours(0, "VOLLZEIT")).toEqual([]);

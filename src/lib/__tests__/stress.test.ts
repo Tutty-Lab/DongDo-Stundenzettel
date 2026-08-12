@@ -3,7 +3,7 @@ import { generateSchedule } from "../scheduler";
 import { maxConsecutiveRun } from "../consecutive";
 import { calculatePause } from "../time";
 import { DEFAULT_WORK_HOURS, resolveDay, type OverrideMap } from "../workHours";
-import { brandenburgHolidays } from "../holidays";
+import { publicHolidays } from "../holidays";
 import { splitTargetHours } from "../splitTargetHours";
 import type { Employee, Shift } from "../../types";
 
@@ -17,7 +17,7 @@ const mk = (id: string, type: Employee["employmentType"], hours: number): Employ
 /** Prüft alle harten Regeln, die der Scheduler laut Kopfkommentar zusichert. */
 function audit(shifts: Shift[], employees: Employee[], year: number, overrides: OverrideMap = {}) {
   const problems: string[] = [];
-  const holidays = brandenburgHolidays(year);
+  const holidays = publicHolidays(year);
 
   // 1. Monats-Soll exakt getroffen
   for (const e of employees) {
@@ -60,8 +60,8 @@ function audit(shifts: Shift[], employees: Employee[], year: number, overrides: 
     if (s.endMinutes - s.startMinutes - s.pauseMinutes !== s.paidMinutes) {
       problems.push(`${s.date}/${s.employeeId}: giờ công không khớp`);
     }
-    if (s.paidMinutes < 4 * 60 || s.paidMinutes > 8 * 60) {
-      problems.push(`${s.date}/${s.employeeId}: ca ${s.paidMinutes / 60}h ngoài 4..8h`);
+    if (s.paidMinutes < 3 * 60 || s.paidMinutes > 8 * 60) {
+      problems.push(`${s.date}/${s.employeeId}: ca ${s.paidMinutes / 60}h ngoài 3..8h`);
     }
   }
 
@@ -75,19 +75,23 @@ describe("splitTargetHours: định mức nào chia được", () => {
     }
   });
 
-  it("từ chối số giờ quá nhỏ", () => {
-    for (const h of [1, 2, 3]) {
+  it("từ chối số giờ quá nhỏ (1, 2)", () => {
+    for (const h of [1, 2]) {
       expect(() => splitTargetHours(h, "VOLLZEIT")).toThrow();
     }
+    // 3h giờ là hợp lệ (một ca 3h).
+    expect(() => splitTargetHours(3, "VOLLZEIT")).not.toThrow();
   });
 });
 
 describe("Scheduler: chạy thử 12 tháng liên tiếp", () => {
+  // Sonntag ist geschlossen -> die Monatskapazität sinkt. Diese Sollwerte sind
+  // in JEDEM Monat 2026 erreichbar (auch im kurzen Februar).
   const employees = [
-    mk("VZ1", "VOLLZEIT", 176),
-    mk("VZ2", "VOLLZEIT", 180),
-    mk("VZ3", "VOLLZEIT", 179),
-    mk("VZ4", "VOLLZEIT", 178),
+    mk("VZ1", "VOLLZEIT", 150),
+    mk("VZ2", "VOLLZEIT", 152),
+    mk("VZ3", "VOLLZEIT", 148),
+    mk("VZ4", "VOLLZEIT", 150),
     mk("TZ1", "TEILZEIT", 40),
     mk("TZ2", "TEILZEIT", 55),
     mk("TZ3", "TEILZEIT", 55),
@@ -135,7 +139,9 @@ describe("Scheduler: định mức cao ép sát số ngày trong tháng", () => 
 
 describe("Scheduler: có ngày đóng cửa", () => {
   it("không xếp ca vào ngày đóng cửa và vẫn đủ định mức", () => {
-    const employees = [mk("VZ1", "VOLLZEIT", 160), mk("TZ1", "TEILZEIT", 60)];
+    // März hat zusätzlich zum geschlossenen Sonntag noch 5 zu geschlossene
+    // Montage -> deutlich weniger offene Tage, daher moderate Sollwerte.
+    const employees = [mk("VZ1", "VOLLZEIT", 112), mk("TZ1", "TEILZEIT", 48)];
     const overrides: OverrideMap = {};
     for (const d of ["2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23", "2026-03-30"]) {
       overrides[d] = { date: d, closed: true };

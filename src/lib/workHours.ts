@@ -1,7 +1,7 @@
 // ============================================================================
 // Arbeitszeit-Fenster (giờ làm) je Wochentag + Feiertag. Das ist das Fenster,
 // in dem Schichten geplant werden dürfen (Früh am Fenster-Beginn, Spät am
-// Fenster-Ende). Feiertage (Brandenburg) werden für Nachfrage & Spätquote wie Sonntag
+// Fenster-Ende). Feiertage (Rheinland-Pfalz) werden für Nachfrage & Spätquote wie Sonntag
 // behandelt, verwenden aber ihr eigenes Zeitfenster.
 // ============================================================================
 
@@ -12,6 +12,12 @@ export type DayWindow = { startMinutes: number; endMinutes: number };
 export type WorkHoursConfig = {
   perWeekday: Record<WeekdayKey, DayWindow>;
   holiday: DayWindow;
+  /**
+   * Wochentage, an denen der Laden grundsätzlich geschlossen ist (kein Dienst).
+   * Bei Dong Do ist das der Sonntag. Ein Datum-Override mit eigenen Zeiten kann
+   * einen solchen Tag im Einzelfall trotzdem öffnen.
+   */
+  closedWeekdays: Record<WeekdayKey, boolean>;
 };
 
 /**
@@ -32,11 +38,12 @@ export type ResolvedDay = { closed: boolean; window: DayWindow };
 
 const w = (start: number, end: number): DayWindow => ({ startMinutes: start, endMinutes: end });
 
-// Vorgabe des Chefs: Arbeitszeit (nicht Öffnungszeit) täglich 11:00–22:00 –
-// an allen Wochentagen gleich, auch sonntags und an Feiertagen.
-// Das Fenster ist 11 h lang, die längste Schicht (8 h + 1 h Pause = 9 h
-// Anwesenheit) passt damit sowohl früh als auch spät hinein.
-const ALL_DAYS = w(11 * 60, 22 * 60); // 11:00–22:00
+// Vorgabe des Chefs (Dong Do Imbiss): Arbeitszeit (Schichtplanung, nicht
+// zwingend die Öffnungszeit) täglich 10:00–20:00. Ohne Pause passt die längste
+// Schicht (8 h Anwesenheit) bequem in das 10-h-Fenster – früh wie spät.
+// Sonntag ist geschlossen (siehe closedWeekdays), das Fenster bleibt aber
+// gesetzt, falls der Chef den Tag im Einzelfall öffnet.
+const ALL_DAYS = w(10 * 60, 20 * 60); // 10:00–20:00
 
 export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
   perWeekday: {
@@ -49,6 +56,15 @@ export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
     sunday: { ...ALL_DAYS },
   },
   holiday: { ...ALL_DAYS },
+  closedWeekdays: {
+    monday: false,
+    tuesday: false,
+    wednesday: false,
+    thursday: false,
+    friday: false,
+    saturday: false,
+    sunday: true, // Dong Do: sonntags geschlossen
+  },
 };
 
 /**
@@ -72,7 +88,8 @@ export function resolveWorkWindow(
 
 /**
  * Vollständige Auflösung eines Tages inkl. Ausnahmen:
- * Ausnahme (closed/eigene Zeiten) > Feiertag > Wochentag.
+ * Ausnahme geschlossen > Ausnahme eigene Zeiten > geschlossener Wochentag
+ * (z.B. Sonntag) > Feiertag > Wochentag.
  */
 export function resolveDay(
   config: WorkHoursConfig,
@@ -82,8 +99,24 @@ export function resolveDay(
 ): ResolvedDay {
   const ov = overrides[isoDate];
   if (ov?.closed) return { closed: true, window: { startMinutes: 0, endMinutes: 0 } };
+  // Ein Override mit eigenen Zeiten öffnet den Tag auch dann, wenn der
+  // Wochentag sonst geschlossen wäre (z.B. Sonderöffnung an einem Sonntag).
   if (ov?.window) return { closed: false, window: ov.window };
+  const weekday = weekdayKeyOf(parseIsoDate(isoDate));
+  if (config.closedWeekdays?.[weekday]) {
+    return { closed: true, window: { startMinutes: 0, endMinutes: 0 } };
+  }
   return { closed: false, window: resolveWorkWindow(config, isoDate, holidays) };
+}
+
+/** Ist der Laden an diesem Datum geschlossen? (für die Anzeige in der UI). */
+export function isDayClosed(
+  config: WorkHoursConfig,
+  isoDate: string,
+  holidays: Set<string>,
+  overrides: OverrideMap = {},
+): boolean {
+  return resolveDay(config, isoDate, holidays, overrides).closed;
 }
 
 /** Tiefe Kopie mit Auffüllen fehlender Felder (für Migration alter Speicherstände). */
@@ -104,5 +137,13 @@ export function normalizeWorkHours(partial: Partial<WorkHoursConfig> | undefined
     typeof partial.holiday.endMinutes === "number"
       ? { ...partial.holiday }
       : { ...base.holiday };
-  return { perWeekday, holiday };
+
+  const closedWeekdays = { ...base.closedWeekdays };
+  if (partial?.closedWeekdays) {
+    for (const key of Object.keys(closedWeekdays) as WeekdayKey[]) {
+      const v = partial.closedWeekdays[key];
+      if (typeof v === "boolean") closedWeekdays[key] = v;
+    }
+  }
+  return { perWeekday, holiday, closedWeekdays };
 }

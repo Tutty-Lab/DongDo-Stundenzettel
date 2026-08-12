@@ -23,7 +23,7 @@ function shiftCost(length: number, type: EmploymentType): number {
   }
   // TEILZEIT: fixe Basis je Schicht (weniger Tage bevorzugt) + Längen-Präferenz.
   const base = 3;
-  const preference: Record<number, number> = { 5: 0, 6: 1, 4: 2, 7: 100, 8: 100 };
+  const preference: Record<number, number> = { 5: 0, 6: 1, 4: 2, 3: 3, 7: 100, 8: 100 };
   return base + preference[length];
 }
 
@@ -59,7 +59,7 @@ export function splitTargetHours(
 
   if (dpCost[targetHours] === INF) {
     throw new Error(
-      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 4–8 giờ).`,
+      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 3–8 giờ).`,
     );
   }
 

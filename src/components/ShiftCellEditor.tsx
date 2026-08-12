@@ -4,7 +4,7 @@ import { calculatePause, minutesToShortHours, minutesToTime, timeToMinutes } fro
 import { isoLabel } from "../lib/shiftOps";
 import { WEEKDAY_LABELS_VI, weekdayKeyOf, parseIsoDate } from "../lib/demand";
 import { resolveDay } from "../lib/workHours";
-import { brandenburgHolidays } from "../lib/holidays";
+import { publicHolidays } from "../lib/holidays";
 
 const inputClass =
   "rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500";
@@ -28,7 +28,7 @@ export function ShiftCellEditor({
   // Standardzeiten für eine neue Schicht = Arbeitszeit-Fenster dieses Tages
   // (inkl. Ausnahmen / Feiertag).
   const overrideMap = Object.fromEntries(schedule.dateOverrides.map((o) => [o.date, o]));
-  const resolved = resolveDay(schedule.workHours, date, brandenburgHolidays(schedule.year), overrideMap);
+  const resolved = resolveDay(schedule.workHours, date, publicHolidays(schedule.year), overrideMap);
   const win = resolved.closed
     ? { startMinutes: schedule.workHours.holiday.startMinutes, endMinutes: schedule.workHours.holiday.endMinutes }
     : resolved.window;

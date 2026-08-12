@@ -11,7 +11,7 @@ import {
   type WeekdayKey,
 } from "../lib/demand";
 import type { DayWindow, WorkHoursConfig } from "../lib/workHours";
-import { brandenburgHolidayNames } from "../lib/holidays";
+import { publicHolidayNames } from "../lib/holidays";
 import { isoLabel } from "../lib/shiftOps";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -45,11 +45,16 @@ function WindowRow({
   hint,
   window,
   onChange,
+  closed,
+  onToggleClosed,
 }: {
   label: string;
   hint?: string;
   window: DayWindow;
   onChange: (next: DayWindow) => void;
+  /** Optional: Schließen-Umschalter (z.B. Sonntag). */
+  closed?: boolean;
+  onToggleClosed?: (next: boolean) => void;
 }) {
   return (
     <div className="flex items-center gap-2 py-1.5">
@@ -57,31 +62,47 @@ function WindowRow({
         <div className="text-sm text-slate-700 leading-tight">{label}</div>
         {hint && <div className="text-[11px] text-slate-400">{hint}</div>}
       </div>
-      <input
-        type="time"
-        className={`${timeClass} min-w-0 flex-1 sm:flex-none`}
-        value={minutesToTime(window.startMinutes)}
-        onChange={(e) => {
-          try {
-            onChange({ ...window, startMinutes: timeToMinutes(e.target.value) });
-          } catch {
-            /* nhập chưa xong */
-          }
-        }}
-      />
-      <span className="text-slate-400">–</span>
-      <input
-        type="time"
-        className={`${timeClass} min-w-0 flex-1 sm:flex-none`}
-        value={minutesToTime(window.endMinutes)}
-        onChange={(e) => {
-          try {
-            onChange({ ...window, endMinutes: timeToMinutes(e.target.value) });
-          } catch {
-            /* nhập chưa xong */
-          }
-        }}
-      />
+      {closed ? (
+        <div className="flex-1 text-sm font-medium text-rose-600">Đóng cửa</div>
+      ) : (
+        <>
+          <input
+            type="time"
+            className={`${timeClass} min-w-0 flex-1 sm:flex-none`}
+            value={minutesToTime(window.startMinutes)}
+            onChange={(e) => {
+              try {
+                onChange({ ...window, startMinutes: timeToMinutes(e.target.value) });
+              } catch {
+                /* nhập chưa xong */
+              }
+            }}
+          />
+          <span className="text-slate-400">–</span>
+          <input
+            type="time"
+            className={`${timeClass} min-w-0 flex-1 sm:flex-none`}
+            value={minutesToTime(window.endMinutes)}
+            onChange={(e) => {
+              try {
+                onChange({ ...window, endMinutes: timeToMinutes(e.target.value) });
+              } catch {
+                /* nhập chưa xong */
+              }
+            }}
+          />
+        </>
+      )}
+      {onToggleClosed && (
+        <label className="flex items-center gap-1 text-[11px] text-slate-500 shrink-0 ml-1">
+          <input
+            type="checkbox"
+            checked={!!closed}
+            onChange={(e) => onToggleClosed(e.target.checked)}
+          />
+          Nghỉ
+        </label>
+      )}
     </div>
   );
 }
@@ -134,14 +155,22 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
     updateMeta({ workHours: { ...schedule.workHours, holiday: next } });
   }
 
+  function setWeekdayClosed(key: WeekdayKey, closed: boolean) {
+    const workHours: WorkHoursConfig = {
+      ...schedule.workHours,
+      closedWeekdays: { ...schedule.workHours.closedWeekdays, [key]: closed },
+    };
+    updateMeta({ workHours });
+  }
+
   const overridesByDate = useMemo(
     () => new Map(schedule.dateOverrides.map((o) => [o.date, o] as const)),
     [schedule.dateOverrides],
   );
 
-  // Feiertage (Brandenburg) im gewählten Monat.
+  // Feiertage (Rheinland-Pfalz) im gewählten Monat.
   const holidaysThisMonth = useMemo(() => {
-    const names = brandenburgHolidayNames(schedule.year);
+    const names = publicHolidayNames(schedule.year);
     const monthDates = new Set(datesOfMonth(schedule.year, schedule.month));
     return [...names.entries()]
       .filter(([iso]) => monthDates.has(iso))
@@ -214,12 +243,14 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
               label={WEEKDAY_LABELS_VI[key]}
               window={schedule.workHours.perWeekday[key]}
               onChange={(next) => setWeekdayWindow(key, next)}
+              closed={schedule.workHours.closedWeekdays?.[key]}
+              onToggleClosed={(next) => setWeekdayClosed(key, next)}
             />
           ))}
           <div className="my-2 border-t border-slate-200" />
           <WindowRow
             label="Ngày lễ"
-            hint="Tự áp dụng cho ngày lễ Brandenburg"
+            hint="Tự áp dụng cho ngày lễ Rheinland-Pfalz"
             window={schedule.workHours.holiday}
             onChange={setHolidayWindow}
           />
@@ -228,7 +259,7 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
         {holidaysThisMonth.length > 0 && (
           <div className="mt-3 rounded bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
             <div className="font-medium mb-1">
-              Ngày lễ Brandenburg trong {MONTH_NAMES_VI[schedule.month - 1]} {schedule.year}:
+              Ngày lễ Rheinland-Pfalz trong {MONTH_NAMES_VI[schedule.month - 1]} {schedule.year}:
             </div>
             <ul className="space-y-1">
               {holidaysThisMonth.map(([iso, name]) => {
