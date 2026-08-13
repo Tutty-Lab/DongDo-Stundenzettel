@@ -12,8 +12,14 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
+/** "2026-08-27" -> "27.08." – kurz, weil oft mehrere Tage nebeneinander stehen. */
+function shortDate(iso: string): string {
+  const [, month, day] = iso.split("-");
+  return `${day}.${month}.`;
+}
+
 export function Dashboard({ store }: { store: UseScheduleReturn }) {
-  const { schedule, validation } = store;
+  const { schedule, validation, peakGaps } = store;
   const vz = schedule.employees.filter((e) => e.employmentType === "VOLLZEIT").length;
   const tz = schedule.employees.filter((e) => e.employmentType === "TEILZEIT").length;
   const targetMin = schedule.employees.reduce((s, e) => s + e.targetMinutes, 0);
@@ -50,6 +56,34 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
       {validation.valid && schedule.shifts.length > 0 && (
         <div className="mt-2 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-3 py-2">
           Tất cả giờ định mức đã được phân bổ chính xác.
+        </div>
+      )}
+      {/*
+        Giờ cao điểm thiếu người KHÔNG phải lỗi định mức — lịch vẫn đúng giờ
+        công. Nó chỉ có nghĩa là tổng giờ trong ngày quá mỏng để lúc nào cũng
+        có 2 người. Trước đây chuyện này diễn ra âm thầm, không ai biết.
+      */}
+      {peakGaps.length > 0 && (
+        <div className="mt-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          <div className="font-medium">
+            {peakGaps.length} ngày chưa đủ 2 người trong giờ cao điểm (12–13g và 17–19g).
+          </div>
+          <div className="mt-1 space-y-0.5">
+            {peakGaps.slice(0, 6).map((d) => (
+              <div key={d.date}>
+                {shortDate(d.date)}{" "}
+                {d.peaks
+                  .filter((p) => !p.ok)
+                  .map((p) => `${p.label === "Mittag" ? "trưa" : "chiều"}: ${p.minStaff}/${p.required}`)
+                  .join(" · ")}{" "}
+                <span className="opacity-70">({d.shiftCount} ca, {d.paidHours}h)</span>
+              </div>
+            ))}
+            {peakGaps.length > 6 && <div className="opacity-70">… và {peakGaps.length - 6} ngày nữa</div>}
+          </div>
+          <div className="mt-1 opacity-80">
+            Cách xử lý: tăng định mức cho nhân viên, thêm người, hoặc chấp nhận những ngày này.
+          </div>
         </div>
       )}
     </div>

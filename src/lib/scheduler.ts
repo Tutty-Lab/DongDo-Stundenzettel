@@ -98,6 +98,9 @@ const SHIFT_HOURS_DESC = [9, 8, 7, 6, 5, 4, 3] as const;
 /** Längste zulässige Schicht in Stunden (bezahlt, ohne Pause). */
 const MAX_SHIFT_HOURS = 9;
 
+/** Kürzeste zulässige Schicht in Minuten – darunter geht ein Soll nicht auf. */
+const MIN_SHIFT_MINUTES = 3 * 60;
+
 /**
  * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs).
  *
@@ -889,11 +892,29 @@ function buildUnmetMessage(
 ): string {
   const full = monthCapacity(dates, dayOf, PREFERRED_HOURS.VOLLZEIT);
 
+  // Ein Soll unter der kürzesten Schicht ist ein EIGENER Fehlerfall. Vorher
+  // fiel er in die Kapazitäts-Erklärung: Wer 2 h eintrug, bekam einen Vortrag
+  // über die 6-Tage-Regel und eine Stundendecke von über 200 h – beides half
+  // nicht weiter. Der wahre Grund ist schlicht, dass 2 h keine Schicht ergibt.
+  const tooSmall = unmet.filter((e) => e.targetMinutes > 0 && e.targetMinutes < MIN_SHIFT_MINUTES);
+  if (tooSmall.length === unmet.length) {
+    const who = tooSmall
+      .map((e) => `${e.name} (${e.targetMinutes / 60}h)`)
+      .join(", ");
+    return (
+      `Định mức quá nhỏ: ${who}. ` +
+      `Ca ngắn nhất là ${MIN_SHIFT_MINUTES / 60}h, nên định mức phải từ ` +
+      `${MIN_SHIFT_MINUTES / 60}h trở lên. Hãy sửa ở tab Nhân viên.`
+    );
+  }
 
   const missing = unmet
     .map((e) => {
       const short = state.remaining.get(e.id)!;
       const done = (e.targetMinutes - short) / 60;
+      if (e.targetMinutes < MIN_SHIFT_MINUTES) {
+        return `${e.name} ${e.targetMinutes / 60}h (nhỏ hơn ca ngắn nhất ${MIN_SHIFT_MINUTES / 60}h)`;
+      }
       const capMin = full.maxMinutes;
       const overCap = e.targetMinutes > capMin ? ` — vượt trần ${capMin / 60}h` : "";
       return `${e.name} chỉ xếp được ${done}h / ${e.targetMinutes / 60}h${overCap}`;

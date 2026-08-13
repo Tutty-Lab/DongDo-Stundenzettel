@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Employee, EmploymentType, Schedule, Shift } from "../types";
 import { generateSchedule } from "../lib/scheduler";
+import { analyzeSchedule } from "../lib/analyze";
 import { validateSchedule, type ValidationResult } from "../lib/validation";
 import { clearState, loadState, saveState, type PersistedState } from "../lib/storage";
 import { isRemoteConfigured, loadRemote, saveRemote, type RemoteStatus } from "../lib/remote";
@@ -131,6 +132,32 @@ export function useSchedule() {
     () => validateSchedule(schedule.employees, schedule.shifts),
     [schedule.employees, schedule.shifts],
   );
+
+  /**
+   * Tage, an denen eine Stoßzeit unterbesetzt ist.
+   *
+   * Das ist bewusst KEIN Validierungsfehler: der Plan ist rechnerisch korrekt,
+   * es sind schlicht zu wenige Leute im Haus. Vorher fiel das nirgends auf –
+   * der Scheduler tut sein Bestes und schweigt, wenn es nicht reicht.
+   */
+  const peakGaps = useMemo(() => {
+    if (schedule.shifts.length === 0) return [];
+    return analyzeSchedule({
+      year: schedule.year,
+      month: schedule.month,
+      workHours: schedule.workHours,
+      overrides: overridesToMap(schedule.dateOverrides),
+      employees: schedule.employees,
+      shifts: schedule.shifts,
+    }).peakViolations;
+  }, [
+    schedule.year,
+    schedule.month,
+    schedule.workHours,
+    schedule.dateOverrides,
+    schedule.employees,
+    schedule.shifts,
+  ]);
 
   // ----- Firma / Monat / Öffnungszeiten -----
   const updateMeta = useCallback((patch: Partial<Schedule>) => {
@@ -286,6 +313,7 @@ export function useSchedule() {
     schedule,
     originalShifts,
     validation,
+    peakGaps,
     genError,
     hasOriginal: originalShifts.length > 0,
     updateMeta,
