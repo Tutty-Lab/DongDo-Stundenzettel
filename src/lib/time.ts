@@ -25,19 +25,25 @@ export function minutesToTime(totalMinutes: number): string {
 }
 
 /**
- * Pausenregel (Vorgabe des Chefs, Dong Do Imbiss):
- * Lange Schichten (8 h und 9 h bezahlt) bekommen 60 Minuten Pause, alle
- * kürzeren Schichten (3..7 h) bleiben ohne Pause.
+ * Pausenregel (Vorgabe des Chefs, Dong Do Imbiss), gestaffelt:
+ *   unter 6 h -> keine Pause
+ *   6 bis 8 h -> 30 Minuten
+ *   ab 9 h    -> 60 Minuten
+ *
+ * Damit liegt der Betrieb über dem gesetzlichen Mindestmaß (ArbZG §4: über
+ * 6 h => 30 min, über 9 h => 45 min).
  *
  * Die Pause kommt ZUSÄTZLICH zur bezahlten Zeit: presence = paid + pause.
  * Eine 9-h-Schicht belegt damit 10 h Anwesenheit und füllt das Fenster
- * 10:00–20:00 exakt aus; eine 8-h-Schicht belegt 9 h.
+ * 10:00–20:00 exakt aus; eine 8-h-Schicht belegt 8,5 h.
  *
  * Alle Zeit-/Schichtberechnungen leiten sich von dieser einen Funktion ab –
  * eine andere Pausenstaffel zu fahren betrifft nur diese Stelle.
  */
 export function calculatePause(paidMinutes: number): number {
-  return paidMinutes >= 8 * 60 ? 60 : 0;
+  if (paidMinutes >= 9 * 60) return 60;
+  if (paidMinutes >= 6 * 60) return 30;
+  return 0;
 }
 
 /**

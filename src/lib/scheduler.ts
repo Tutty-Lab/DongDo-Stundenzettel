@@ -31,6 +31,7 @@ import { presenceFromPaid } from "./time";
 import {
   effectiveWeekdayKey,
   resolveDay,
+  type DayWindow,
   type ResolvedDay,
   type OverrideMap,
   type WorkHoursConfig,
@@ -72,6 +73,8 @@ type SchedulerState = {
   rng: () => number;
   /** true = Schichtlängen mischen; false = immer die längste (Rückfallmodus). */
   varyLengths: boolean;
+  /** employeeId -> verbleibende bewusste Kurzschichten in diesem Monat. */
+  shortBudget: Map<string, number>;
 };
 
 /** Länge des Zeitfensters in Minuten (0 wenn geschlossen). */
@@ -96,14 +99,36 @@ const SHIFT_HOURS_DESC = [9, 8, 7, 6, 5, 4, 3] as const;
 const MAX_SHIFT_HOURS = 9;
 
 /**
- * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs):
- * Vollzeit macht lange Schichten (6..9 h), Teilzeit die volle Bandbreite
- * 3..9 h. Kurze 3-h-Schichten sind bei Dong Do ausdrücklich erlaubt.
+ * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs).
+ *
+ * Vollzeit stand früher auf 6..9 h. Dadurch konnte eine Vollzeitkraft NIE
+ * einen kurzen Dienst bekommen, auch wenn im Monat reichlich Tage übrig
+ * waren – der Plan wirkte dadurch mechanisch (fast nur 8/9-h-Schichten).
+ * Jetzt sind 4 und 5 h zugelassen; wie oft sie wirklich vorkommen, steuert
+ * das Kurzschicht-Budget (siehe SHORT_SHIFT_BUDGET), nicht diese Liste.
+ * Die ganz kurze 3-h-Schicht bleibt der Teilzeit vorbehalten.
  */
 const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
-  VOLLZEIT: [6, 7, 8, 9],
+  VOLLZEIT: [4, 5, 6, 7, 8, 9],
   TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
 };
+
+/**
+ * Wie viele bewusst KURZE Dienste darf ein Mitarbeiter pro Monat bekommen?
+ *
+ * Ohne diese Reserve wählt der Scheduler immer die längste Schicht, die das
+ * Tempo hält – das Monats-Soll geht auf, aber jeder Monat sieht gleich aus.
+ * Mit dem Budget wird ein langer Dienst gelegentlich durch zwei kurze ersetzt
+ * (z.B. 8 h -> 4 h + 4 h). Das Budget greift nur, wenn genügend Tage übrig
+ * sind; das Monats-Soll bleibt in jedem Fall exakt.
+ */
+const SHORT_SHIFT_BUDGET = 3;
+
+/** Ab wie vielen freien Reservetagen darf eine Kurzschicht gezogen werden? */
+const SHORT_SHIFT_MIN_SLACK = 2;
+
+/** Wahrscheinlichkeit, das Budget bei einer Platzierung einzusetzen. */
+const SHORT_SHIFT_CHANCE = 0.35;
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
 const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8, 9];
@@ -220,6 +245,8 @@ export function chooseShiftHours(
   needHours = MAX_SHIFT_HOURS,
   /** Ohne Zufallsquelle wird deterministisch die kürzeste taugliche gewählt. */
   rng?: () => number,
+  /** true = für diese Platzierung bewusst eine kurze Schicht ziehen. */
+  preferShort = false,
 ): number {
   const remainingHours = remainingMinutes / 60;
   const cap = Math.min(MAX_SHIFT_HOURS, maxHours, remainingHours);
@@ -253,6 +280,14 @@ export function chooseShiftHours(
   // halten. Wer noch viel Soll und wenig Tage hat, bekommt zwangsläufig lange
   // Schichten; wer gut liegt, bekommt Abwechslung.
   const onPace = valid.filter((h) => h >= needHours);
+
+  // Bewusste Kurzschicht: alles UNTER dem nötigen Tempo. Erlaubt ist das nur,
+  // wenn der Aufrufer genug Reservetage gezählt hat – sonst reißt das Soll.
+  if (rng && preferShort) {
+    const short = valid.filter((h) => h < needHours);
+    if (short.length > 0) return short[Math.floor(rng() * short.length)];
+  }
+
   const pool = onPace.length > 0 ? onPace : [valid[valid.length - 1]];
 
   if (!rng) return pool[pool.length - 1];
@@ -360,6 +395,20 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
   const usableDays = Math.max(1, Math.floor(daysLeft * 0.9));
   const needHours = daysLeft > 0 ? Math.ceil(remaining / 60 / usableDays) : MAX_SHIFT_HOURS;
 
+  // Reservetage = wie viele Tage über das absolute Minimum hinaus übrig sind,
+  // wenn ab jetzt nur noch die längste Schicht käme. Nur aus dieser Reserve
+  // darf eine Kurzschicht bezahlt werden – sonst geht das Soll nicht mehr auf.
+  const minDaysNeeded = Math.ceil(remaining / 60 / MAX_SHIFT_HOURS);
+  const slackDays = daysLeft - minDaysNeeded;
+  const budget = state.shortBudget.get(employee.id) ?? 0;
+  // Die Entscheidung fällt EINMAL je Platzierung, nicht je Kandidatentag –
+  // sonst hinge sie davon ab, wie viele Tage gerade geprüft werden.
+  const preferShort =
+    state.varyLengths &&
+    budget > 0 &&
+    slackDays >= SHORT_SHIFT_MIN_SLACK &&
+    state.rng() < SHORT_SHIFT_CHANCE;
+
   let bestDate: string | null = null;
   let bestHours = 0;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -377,6 +426,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
       employee.employmentType,
       needHours,
       state.varyLengths ? state.rng : undefined,
+      preferShort,
     );
     if (hours === 0) continue; // hier passt keine gültige Schicht
 
@@ -411,6 +461,11 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
   }
 
   if (bestDate === null || bestHours === 0) return false;
+
+  // Budget nur abbuchen, wenn wirklich unter Tempo geplant wurde.
+  if (preferShort && bestHours < needHours) {
+    state.shortBudget.set(employee.id, budget - 1);
+  }
 
   const shift = makeShift(state, employee, bestDate, bestHours * 60);
   applyShift(state, shift);
@@ -687,7 +742,104 @@ function balanceShiftTypes(state: SchedulerState): void {
       if (!best) break; // keine Drehung verbessert noch etwas
       retypeShift(state, best, best.shiftType === "LATE" ? "EARLY" : "LATE");
     }
+
+    // 4. Reicht Drehen nicht, die Dienste im Fenster neu ANORDNEN.
+    layoutDayForPeaks(day.window, onDay);
   }
+}
+
+/** Verschiebt einen Dienst auf eine neue Startzeit; Dauer bleibt gleich. */
+function moveShiftTo(shift: Shift, startMinutes: number): void {
+  const presence = shift.endMinutes - shift.startMinutes;
+  shift.startMinutes = startMinutes;
+  shift.endMinutes = startMinutes + presence;
+}
+
+/**
+ * Startzeiten, an denen ein Dienst überhaupt etwas Nützliches beiträgt:
+ * aufsperren, zusperren, oder eine Stoßzeit vollständig abdecken.
+ */
+function candidateStarts(shift: Shift, window: DayWindow): number[] {
+  const presence = shift.endMinutes - shift.startMinutes;
+  const latest = window.endMinutes - presence;
+  if (latest < window.startMinutes) return [window.startMinutes];
+
+  const out = new Set<number>([window.startMinutes, latest]);
+  for (const peak of PEAK_WINDOWS) {
+    const from = Math.max(peak.startMinutes, window.startMinutes);
+    const to = Math.min(peak.endMinutes, window.endMinutes);
+    if (to <= from || presence < to - from) continue;
+    const lo = Math.max(window.startMinutes, to - presence);
+    const hi = Math.min(from, latest);
+    if (lo <= hi) {
+      out.add(lo);
+      out.add(hi);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * Ordnet die Dienste eines Tages so an, dass beide Stoßzeiten besetzt sind
+ * und trotzdem jemand auf- und zusperrt. Dauer und Pause bleiben unangetastet
+ * => das Monats-Soll bleibt exakt erhalten.
+ *
+ * Warum nicht einfach Dienst für Dienst verschieben: das bleibt in einem
+ * lokalen Optimum stecken. Beispiel 27.07. – eine 8-h-Frühschicht (10:00 bis
+ * 18:30) und zwei 5-h-Spätschichten. Mittags steht nur einer im Laden. Wer
+ * die Frühschicht verschieben will, nimmt dem Tag den Aufsperrer, also wird
+ * der Zug verworfen; erst wenn VORHER eine Spätschicht auf 10:00 rückt, geht
+ * es auf. Ein einzelner Zug kommt dort nie hin.
+ *
+ * Deshalb: Auf- und Zusperrer werden zuerst festgelegt (alle Paare werden
+ * durchprobiert), der Rest wird danach frei eingeplant.
+ */
+function layoutDayForPeaks(window: DayWindow, onDay: Shift[]): void {
+  if (onDay.length < 2) return;
+  if (peakDeficit(onDay, window) === 0) return; // schon gut
+
+  const starts = onDay.map((s) => s.startMinutes);
+  const restore = (list: number[]) => onDay.forEach((s, i) => moveShiftTo(s, list[i]));
+
+  let bestStarts = [...starts];
+  let bestDeficit = peakDeficit(onDay, window);
+
+  for (let i = 0; i < onDay.length && bestDeficit > 0; i++) {
+    for (let j = 0; j < onDay.length && bestDeficit > 0; j++) {
+      if (i === j) continue;
+      restore(starts);
+
+      // i sperrt auf, j sperrt zu.
+      const closerStart = window.endMinutes - (onDay[j].endMinutes - onDay[j].startMinutes);
+      if (closerStart < window.startMinutes) continue;
+      moveShiftTo(onDay[i], window.startMinutes);
+      moveShiftTo(onDay[j], closerStart);
+
+      // Alle übrigen Dienste greedy dorthin, wo sie am meisten helfen.
+      for (let k = 0; k < onDay.length; k++) {
+        if (k === i || k === j) continue;
+        let pick = onDay[k].startMinutes;
+        let pickDeficit = Number.POSITIVE_INFINITY;
+        for (const c of candidateStarts(onDay[k], window)) {
+          moveShiftTo(onDay[k], c);
+          const d = peakDeficit(onDay, window);
+          if (d < pickDeficit) {
+            pickDeficit = d;
+            pick = c;
+          }
+        }
+        moveShiftTo(onDay[k], pick);
+      }
+
+      const deficit = peakDeficit(onDay, window);
+      if (deficit < bestDeficit) {
+        bestDeficit = deficit;
+        bestStarts = onDay.map((s) => s.startMinutes);
+      }
+    }
+  }
+
+  restore(bestStarts);
 }
 
 /**
@@ -830,6 +982,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
       dayOf,
       rng: seededRandom(seed + salt),
       varyLengths,
+      shortBudget: new Map(employees.map((e) => [e.id, SHORT_SHIFT_BUDGET])),
     };
 
     // Rundenweise, rotierend platzieren: pro Runde eine Schicht je Mitarbeiter,

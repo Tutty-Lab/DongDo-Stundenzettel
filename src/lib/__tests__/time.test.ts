@@ -28,15 +28,18 @@ describe("timeToMinutes / minutesToTime", () => {
 });
 
 describe("calculatePause", () => {
-  it("kurze Schichten (3..7 h) bleiben ohne Pause", () => {
+  it("unter 6 h ohne Pause", () => {
     expect(calculatePause(3 * 60)).toBe(0);
-    expect(calculatePause(6 * 60)).toBe(0);
-    expect(calculatePause(7 * 60)).toBe(0);
-    // knapp unter 8 h zählt noch als kurz
-    expect(calculatePause(7 * 60 + 59)).toBe(0);
+    expect(calculatePause(5 * 60)).toBe(0);
+    expect(calculatePause(6 * 60 - 1)).toBe(0);
   });
-  it("lange Schichten (8 h und 9 h) bekommen 60 Minuten", () => {
-    expect(calculatePause(8 * 60)).toBe(60);
+  it("6 bis 8 h bekommen 30 Minuten", () => {
+    expect(calculatePause(6 * 60)).toBe(30);
+    expect(calculatePause(7 * 60)).toBe(30);
+    expect(calculatePause(8 * 60)).toBe(30);
+    expect(calculatePause(9 * 60 - 1)).toBe(30);
+  });
+  it("ab 9 h sind es 60 Minuten", () => {
     expect(calculatePause(9 * 60)).toBe(60);
   });
 });
@@ -47,14 +50,15 @@ describe("calculatePaidMinutes / presenceFromPaid", () => {
     expect(calculatePaidMinutes(720, 1200, 0)).toBe(480);
     // 16:00-20:00, keine Pause => 4 h
     expect(calculatePaidMinutes(960, 1200, 0)).toBe(240);
-    // 10:00-19:00 mit 60 min Pause => 8 h bezahlt
-    expect(calculatePaidMinutes(600, 1140, 60)).toBe(480);
+    // 10:00-18:30 mit 30 min Pause => 8 h bezahlt
+    expect(calculatePaidMinutes(600, 1110, 30)).toBe(480);
   });
   it("presence = paid + Pause", () => {
     expect(presenceFromPaid(180)).toBe(180); // 3 h, keine Pause
-    expect(presenceFromPaid(240)).toBe(240); // 4 h, keine Pause
-    expect(presenceFromPaid(420)).toBe(420); // 7 h, keine Pause
-    expect(presenceFromPaid(480)).toBe(540); // 8 h + 60 min = 9 h Anwesenheit
+    expect(presenceFromPaid(300)).toBe(300); // 5 h, keine Pause
+    expect(presenceFromPaid(360)).toBe(390); // 6 h + 30 min
+    expect(presenceFromPaid(420)).toBe(450); // 7 h + 30 min
+    expect(presenceFromPaid(480)).toBe(510); // 8 h + 30 min = 8,5 h Anwesenheit
     expect(presenceFromPaid(540)).toBe(600); // 9 h + 60 min = 10 h Anwesenheit
   });
 });
