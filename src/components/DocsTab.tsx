@@ -4,6 +4,9 @@ import {
   WEEKDAY_LABELS_VI,
   type WeekdayKey,
 } from "../lib/demand";
+import { SHIFT_LENGTHS } from "../lib/shifts";
+import { PEAK_WINDOWS } from "../lib/scheduler";
+import { calculatePause, minutesToTime, presenceFromPaid } from "../lib/time";
 
 const WEEKDAY_ORDER: WeekdayKey[] = [
   "monday",
@@ -83,14 +86,14 @@ export function DocsTab() {
 
       <Section title="Nguyên tắc bắt buộc (luôn đúng)">
         <ul className="list-disc pl-5 space-y-1">
-          <li>Tối đa <b>8 giờ công</b> mỗi ngày cho một người.</li>
+          <li>Tối đa <b>9 giờ công</b> mỗi ngày cho một người.</li>
           <li>Mỗi người <b>một ca mỗi ngày</b>.</li>
           <li>Không làm quá <b>6 ngày liên tiếp</b>.</li>
           <li>
             Mỗi người phải đạt <b>đúng định mức tháng</b> (Sollstunden) — không thừa, không thiếu.
           </li>
           <li>
-            <b>Không có giờ nghỉ (Pause)</b> trong ngày — giờ có mặt = giờ công (theo yêu cầu của quán).
+            Giờ nghỉ <b>cộng thêm</b> vào giờ có mặt, <b>không trừ</b> vào giờ công (bảng ở mục 3).
           </li>
         </ul>
       </Section>
@@ -125,18 +128,73 @@ export function DocsTab() {
           highlight={(k) => LATE_SHIFT_RATIOS[k] >= 0.5}
         />
         <p className="text-slate-600">
-          App luôn bảo đảm <b>hai khung cao điểm</b>: trưa (12:30) và tối (18:30). Ngày đông (Thứ 3–7)
-          có <b>đội trưa ≥ 2 người</b>; luôn có người mở cửa lúc 10:00 và người đóng cửa lúc 20:00.
+          App cố gắng bảo đảm <b>hai khung cao điểm</b> —{" "}
+          {PEAK_WINDOWS.map(
+            (p) =>
+              `${minutesToTime(p.startMinutes)}–${minutesToTime(p.endMinutes)} (≥ ${p.minStaff} người)`,
+          ).join(" và ")}{" "}
+          — <b>suốt cả khung</b>, không phải chỉ tại một thời điểm. Đồng thời luôn có người mở cửa lúc
+          10:00 và người đóng cửa lúc 20:00.
+        </p>
+        <p className="text-slate-600">
+          Nếu tổng giờ trong ngày quá ít thì <b>không thể</b> đủ 2 người — ví dụ cả quán chỉ có 2 nhân
+          viên. Khi đó lịch vẫn đúng định mức, nhưng <b>Bảng tổng quan sẽ cảnh báo</b> và liệt kê những
+          ngày bị hụt. Cách xử lý: tăng định mức, thêm người, hoặc chấp nhận ngày đó.
         </p>
       </Section>
 
-      <Section title="3) Độ dài ca co theo khung giờ trong ngày">
+      <Section title="3) Độ dài ca và giờ nghỉ">
         <p>
           Ca sáng bắt đầu ở đầu khung giờ, ca tối kết thúc ở cuối khung. Nếu một ngày mở{" "}
           <b>ngắn hơn</b> (VD nửa buổi), ca sẽ <b>tự co ngắn lại</b> cho vừa khung — kể cả nhân viên toàn
           thời gian vẫn đi làm ca ngắn hôm đó, và <b>định mức tháng vẫn được bù đủ</b> ở các ngày khác.
         </p>
-        <p className="text-slate-600">Độ dài ca cho phép: 3, 4, 5, 6, 7, 8 giờ.</p>
+        <p>
+          Giờ nghỉ <b>không trừ vào giờ công</b> mà kéo dài thời gian có mặt. Ví dụ ca 9 giờ công chiếm
+          trọn 10:00–20:00 vì có thêm 60 phút nghỉ.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="text-sm border-collapse">
+            <thead>
+              <tr>
+                <th className="border border-slate-200 bg-slate-50 px-3 py-1 text-left font-medium text-slate-600">
+                  Giờ công
+                </th>
+                {SHIFT_LENGTHS.map((h) => (
+                  <th
+                    key={h}
+                    className="border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-600"
+                  >
+                    {h}h
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="border border-slate-200 px-3 py-1 text-slate-600">Nghỉ</td>
+                {SHIFT_LENGTHS.map((h) => (
+                  <td key={h} className="border border-slate-200 px-3 py-1 text-center font-semibold">
+                    {calculatePause(h * 60)}′
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="border border-slate-200 px-3 py-1 text-slate-600">Có mặt</td>
+                {SHIFT_LENGTHS.map((h) => (
+                  <td key={h} className="border border-slate-200 px-3 py-1 text-center">
+                    {(presenceFromPaid(h * 60) / 60).toFixed(1).replace(".", ",")}h
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-slate-600">
+          Nhân viên <b>toàn thời gian</b> chủ yếu nhận ca dài, nhưng mỗi tháng vẫn được vài ca ngắn
+          (4–5 giờ) để lịch không bị lặp cứng — chỉ khi tháng đó còn dư ngày. Ca <b>3 giờ</b> dành riêng
+          cho nhân viên bán thời gian.
+        </p>
       </Section>
 
       <Section title="4) Ngày lễ (tự phát hiện — bang Rheinland-Pfalz)">
