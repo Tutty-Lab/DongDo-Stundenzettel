@@ -2,12 +2,12 @@
 // Zerlegt die monatlichen Sollstunden eines Mitarbeiters in Schichtlängen.
 // Reine Funktion, deterministisch, über eine kleine DP realisiert.
 //
-// Erlaubte Längen: 8, 7, 6, 5, 4 (keine Schichten < 4 h).
+// Erlaubte Längen: 3..9 h (siehe SHIFT_LENGTHS).
 // Die Summe der zurückgegebenen Längen ergibt exakt targetHours.
 //
-// Vollzeit: bevorzugt 8-h-Schichten, minimiert die Anzahl der Schichten,
-//           4-7 h nur um das exakte Soll zu treffen.
-// Teilzeit: bevorzugt 4/5/6 h (Schwerpunkt 5), 7/8 h nur im Notfall,
+// Vollzeit: bevorzugt die längsten Schichten (9 h), minimiert die Anzahl der
+//           Schichten, kürzere Längen nur um das exakte Soll zu treffen.
+// Teilzeit: bevorzugt 4/5/6 h (Schwerpunkt 5), 7/8/9 h nur im Notfall,
 //           vermeidet unnötig viele Arbeitstage.
 // ============================================================================
 
@@ -22,8 +22,18 @@ function shiftCost(length: number, type: EmploymentType): number {
     return 100 - length * length;
   }
   // TEILZEIT: fixe Basis je Schicht (weniger Tage bevorzugt) + Längen-Präferenz.
+  // Jede Länge aus SHIFT_LENGTHS braucht einen Eintrag – fehlt einer, wird die
+  // Kosten-Summe NaN und die Länge fällt lautlos aus der DP heraus.
   const base = 3;
-  const preference: Record<number, number> = { 5: 0, 6: 1, 4: 2, 3: 3, 7: 100, 8: 100 };
+  const preference: Record<number, number> = {
+    5: 0,
+    6: 1,
+    4: 2,
+    3: 3,
+    7: 100,
+    8: 100,
+    9: 100,
+  };
   return base + preference[length];
 }
 
@@ -59,7 +69,7 @@ export function splitTargetHours(
 
   if (dpCost[targetHours] === INF) {
     throw new Error(
-      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 3–8 giờ).`,
+      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 3–9 giờ).`,
     );
   }
 

@@ -26,15 +26,18 @@ export function minutesToTime(totalMinutes: number): string {
 
 /**
  * Pausenregel (Vorgabe des Chefs, Dong Do Imbiss):
- * KEINE Pause – der Laden zieht keine Pause von der Arbeitszeit ab.
- * Anwesenheit = bezahlte Zeit (presence = paid), pauseMinutes ist immer 0.
+ * Lange Schichten (8 h und 9 h bezahlt) bekommen 60 Minuten Pause, alle
+ * kürzeren Schichten (3..7 h) bleiben ohne Pause.
  *
- * Hinweis: Damit steht auf dem Stundenzettel keine Pause. Das ist so gewünscht;
- * eine spätere Umstellung auf eine gesetzliche Pausenregel würde nur diese
- * eine Funktion betreffen (alle Zeit-/Schichtberechnungen leiten sich davon ab).
+ * Die Pause kommt ZUSÄTZLICH zur bezahlten Zeit: presence = paid + pause.
+ * Eine 9-h-Schicht belegt damit 10 h Anwesenheit und füllt das Fenster
+ * 10:00–20:00 exakt aus; eine 8-h-Schicht belegt 9 h.
+ *
+ * Alle Zeit-/Schichtberechnungen leiten sich von dieser einen Funktion ab –
+ * eine andere Pausenstaffel zu fahren betrifft nur diese Stelle.
  */
-export function calculatePause(_paidMinutes: number): number {
-  return 0;
+export function calculatePause(paidMinutes: number): number {
+  return paidMinutes >= 8 * 60 ? 60 : 0;
 }
 
 /**

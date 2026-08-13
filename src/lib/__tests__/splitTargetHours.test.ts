@@ -11,23 +11,20 @@ describe("splitTargetHours – Vollzeit", () => {
       const parts = splitTargetHours(h, "VOLLZEIT");
       expect(sum(parts)).toBe(h);
       for (const p of parts) expect(p).toBeGreaterThanOrEqual(3);
-      for (const p of parts) expect(p).toBeLessThanOrEqual(8);
+      for (const p of parts) expect(p).toBeLessThanOrEqual(9);
     }
   });
 
-  it("bevorzugt 8-h-Schichten (möglichst viele 8er)", () => {
-    expect(splitTargetHours(176, "VOLLZEIT")).toEqual(Array(22).fill(8));
-    // 180 = 22×8 + 4
-    expect(splitTargetHours(180, "VOLLZEIT").filter((x) => x === 8).length).toBe(22);
-    expect(sum(splitTargetHours(180, "VOLLZEIT"))).toBe(180);
-    // 179 = 22×8 + 3 (mit 3-h-Schichten sind mehr 8er möglich)
-    const s179 = splitTargetHours(179, "VOLLZEIT");
-    expect(s179.filter((x) => x === 8).length).toBe(22);
-    expect(sum(s179)).toBe(179);
-    // 178 = 21×8 + 7 + 3
-    const s178 = splitTargetHours(178, "VOLLZEIT");
-    expect(s178.filter((x) => x === 8).length).toBe(21);
-    expect(sum(s178)).toBe(178);
+  it("bevorzugt die längste Schicht (9 h) und damit möglichst wenige Dienste", () => {
+    // 176 = 19×9 + 5
+    expect(splitTargetHours(176, "VOLLZEIT")).toEqual([...Array(19).fill(9), 5]);
+    // Jedes Ziel wird mit der kleinstmöglichen Schichtzahl abgedeckt:
+    // aufgerundet targetHours/9 Dienste.
+    for (const h of [176, 178, 179, 180]) {
+      const parts = splitTargetHours(h, "VOLLZEIT");
+      expect(sum(parts)).toBe(h);
+      expect(parts.length).toBe(Math.ceil(h / 9));
+    }
   });
 });
 

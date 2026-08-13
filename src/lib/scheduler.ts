@@ -90,25 +90,39 @@ function isWeekend(isoDate: string): boolean {
   return key === "friday" || key === "saturday";
 }
 
-const SHIFT_HOURS_DESC = [8, 7, 6, 5, 4, 3] as const;
+const SHIFT_HOURS_DESC = [9, 8, 7, 6, 5, 4, 3] as const;
+
+/** Längste zulässige Schicht in Stunden (bezahlt, ohne Pause). */
+const MAX_SHIFT_HOURS = 9;
 
 /**
  * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs):
- * Vollzeit macht lange Schichten (6/7/8 h), Teilzeit die volle Bandbreite
- * 3..8 h. Kurze 3-h-Schichten sind bei Dong Do ausdrücklich erlaubt.
+ * Vollzeit macht lange Schichten (6..9 h), Teilzeit die volle Bandbreite
+ * 3..9 h. Kurze 3-h-Schichten sind bei Dong Do ausdrücklich erlaubt.
  */
 const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
-  VOLLZEIT: [6, 7, 8],
-  TEILZEIT: [3, 4, 5, 6, 7, 8],
+  VOLLZEIT: [6, 7, 8, 9],
+  TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
 };
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
-const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8];
+const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8, 9];
 
 // ── Stoßzeiten (peak windows) ───────────────────────────────────────────────
-// Zwei Spitzen wie in einem echten Restaurant: mittags und abends. Der Abend
-// ist die stärkere Spitze. Die Werte sind Messpunkte "mitten in der Spitze".
-const LUNCH_PROBE = 12 * 60 + 30; // 12:30
+// Vorgabe des Chefs: mittags 12–13 Uhr und abends 17–19 Uhr müssen JEDERZEIT
+// mindestens zwei Leute im Laden stehen – nicht nur an einem Messpunkt,
+// sondern über die ganze Spanne.
+export type PeakWindow = {
+  label: string;
+  startMinutes: number;
+  endMinutes: number;
+  minStaff: number;
+};
+
+export const PEAK_WINDOWS: readonly PeakWindow[] = [
+  { label: "Mittag", startMinutes: 12 * 60, endMinutes: 13 * 60, minStaff: 2 },
+  { label: "Abend", startMinutes: 17 * 60, endMinutes: 19 * 60, minStaff: 2 },
+];
 
 /** Wie viele Leute sind zum Zeitpunkt `t` anwesend (Anwesenheit inkl. Pause)? */
 function coverageAt(shifts: Shift[], t: number): number {
@@ -118,14 +132,35 @@ function coverageAt(shifts: Shift[], t: number): number {
 }
 
 /**
- * Ziel-Mindestbesetzung der Mittagsspitze abhängig von der Tagesgröße `n`
- * (Anzahl Schichten an dem Tag). Ruhige Tage: eine Person sperrt auf und deckt
- * den Mittag; volle Tage (Fr/Sa/So) sollen auch mittags ein Team haben – der
- * Abend bleibt trotzdem die stärkere Spitze (siehe Prüfung beim Drehen).
+ * Kleinste Besetzung im halboffenen Intervall [from, to).
+ * Die Besetzung ändert sich nur an Schichtgrenzen, deshalb genügt es, den
+ * Anfang und jede Grenze innerhalb des Intervalls zu prüfen.
  */
-function lunchTargetFor(n: number): number {
-  const goal = n >= 6 ? 3 : n >= 4 ? 2 : 1;
-  return Math.min(goal, n - 1); // Abend kann so immer >= Mittag bleiben
+export function minCoverageOver(shifts: Shift[], from: number, to: number): number {
+  const probes = new Set<number>([from]);
+  for (const s of shifts) {
+    if (s.startMinutes > from && s.startMinutes < to) probes.add(s.startMinutes);
+    if (s.endMinutes > from && s.endMinutes < to) probes.add(s.endMinutes);
+  }
+  let min = Number.POSITIVE_INFINITY;
+  for (const t of probes) min = Math.min(min, coverageAt(shifts, t));
+  return Number.isFinite(min) ? min : 0;
+}
+
+/**
+ * Wie viele Personen fehlen an diesem Tag über alle Stoßzeiten zusammen?
+ * 0 = beide Spitzen sind ausreichend besetzt. Spitzen, die gar nicht ins
+ * Arbeitszeit-Fenster fallen, zählen nicht mit.
+ */
+export function peakDeficit(shifts: Shift[], window: { startMinutes: number; endMinutes: number }): number {
+  let deficit = 0;
+  for (const peak of PEAK_WINDOWS) {
+    const from = Math.max(peak.startMinutes, window.startMinutes);
+    const to = Math.min(peak.endMinutes, window.endMinutes);
+    if (to <= from) continue; // Spitze liegt außerhalb der Arbeitszeit
+    deficit += Math.max(0, peak.minStaff - minCoverageOver(shifts, from, to));
+  }
+  return deficit;
 }
 
 /**
@@ -155,8 +190,8 @@ function canDecompose(hours: number, allowed: readonly number[]): boolean {
 
 /** Längstmögliche Schicht je Anstellungsart – für die Kapazitätsrechnung. */
 const PREFERRED_HOURS: Record<Employee["employmentType"], number> = {
-  VOLLZEIT: 8,
-  TEILZEIT: 8,
+  VOLLZEIT: MAX_SHIFT_HOURS,
+  TEILZEIT: MAX_SHIFT_HOURS,
 };
 
 /** Größte Schichtlänge (Stunden), deren Anwesenheit noch ins Fenster passt (0 = keine). */
@@ -169,8 +204,8 @@ export function maxShiftHoursForWindow(windowMinutes: number): number {
 
 /**
  * Wählt die Länge (Stunden) der nächsten Schicht eines Mitarbeiters so, dass
- * - sie 4..8 h ist und ins Tagesfenster passt (<= maxHours),
- * - der verbleibende Rest exakt aufteilbar bleibt (0 oder >= 4 h),
+ * - sie 3..9 h ist und ins Tagesfenster passt (<= maxHours),
+ * - der verbleibende Rest exakt aufteilbar bleibt (0 oder >= 3 h),
  * - Vollzeit möglichst lange, Teilzeit eher kürzere Schichten bekommt.
  * Gibt 0 zurück, wenn an diesem Tag keine gültige Länge möglich ist.
  *
@@ -182,12 +217,12 @@ export function chooseShiftHours(
   maxHours: number,
   employmentType: Employee["employmentType"],
   /** Mindestlänge, um das Soll bis Monatsende noch zu schaffen (Stunden). */
-  needHours = 8,
+  needHours = MAX_SHIFT_HOURS,
   /** Ohne Zufallsquelle wird deterministisch die kürzeste taugliche gewählt. */
   rng?: () => number,
 ): number {
   const remainingHours = remainingMinutes / 60;
-  const cap = Math.min(8, maxHours, remainingHours);
+  const cap = Math.min(MAX_SHIFT_HOURS, maxHours, remainingHours);
   if (cap < 3) return 0;
 
   // Erlaubte Längen je Anstellungsart (Vorgabe des Chefs): Vollzeit macht keine
@@ -323,7 +358,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
   // Tag, weil die 6-Tage-Regel Lücken erzwingt. Ohne Sicherheitsabschlag wählt
   // der Zufall zu kurze Schichten und das Soll geht am Monatsende nicht auf.
   const usableDays = Math.max(1, Math.floor(daysLeft * 0.9));
-  const needHours = daysLeft > 0 ? Math.ceil(remaining / 60 / usableDays) : 8;
+  const needHours = daysLeft > 0 ? Math.ceil(remaining / 60 / usableDays) : MAX_SHIFT_HOURS;
 
   let bestDate: string | null = null;
   let bestHours = 0;
@@ -403,7 +438,12 @@ function removeShift(state: SchedulerState, shift: Shift): void {
     );
   }
   const idx = state.shifts.indexOf(shift);
-  if (idx >= 0) state.shifts.splice(idx, 1);
+  // Ohne diese Prüfung würde splice(-1, 1) die LETZTE Schicht löschen und das
+  // Monats-Soll lautlos reißen.
+  if (idx < 0) {
+    throw new Error("removeShift: Schicht ist nicht (mehr) im Plan");
+  }
+  state.shifts.splice(idx, 1);
 }
 
 /**
@@ -456,8 +496,82 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
         improved = true;
       }
     }
+    if (trySwaps(state, employeesById)) improved = true;
     if (!improved) break;
   }
+}
+
+/**
+ * Tauscht zwei Schichten zwischen zwei Tagen (verschiedene Mitarbeiter).
+ *
+ * Warum zusätzlich zum Umzug: ein Umzug verschiebt immer den GANZEN Block –
+ * bei Schichten von 3..9 h springt das Tages-Soll dadurch grob. Ein Tausch
+ * verschiebt nur die Differenz der beiden Längen (z.B. 9 h gegen 7 h = 2 h)
+ * und trifft die Tagesnachfrage deutlich feiner.
+ *
+ * Wie der Umzug ändert der Tausch keine Dauer und verletzt keine harte Regel
+ * => jedes Monats-Soll bleibt exakt erhalten.
+ */
+function trySwaps(state: SchedulerState, employeesById: Map<string, Employee>): boolean {
+  let improved = false;
+  const snapshot = [...state.shifts];
+
+  for (let i = 0; i < snapshot.length; i++) {
+    const a = snapshot[i];
+    if (!state.shifts.includes(a)) continue; // schon getauscht
+    for (let j = i + 1; j < snapshot.length; j++) {
+      const b = snapshot[j];
+      if (!state.shifts.includes(b)) continue;
+      if (a.date === b.date) continue; // gleicher Tag => keine Wirkung
+      if (a.paidMinutes === b.paidMinutes) continue; // gleiche Länge => keine Wirkung
+      if (a.employeeId === b.employeeId) continue; // das wäre ein Umzug
+
+      const empA = employeesById.get(a.employeeId)!;
+      const empB = employeesById.get(b.employeeId)!;
+      const workedA = state.worked.get(empA.id)!;
+      const workedB = state.worked.get(empB.id)!;
+      // Harte Regel: höchstens ein Dienst pro Mitarbeiter und Tag.
+      if (workedA.has(b.date) || workedB.has(a.date)) continue;
+
+      // Die getauschten Längen müssen in das jeweilige Fenster passen.
+      const dayA = state.dayOf(a.date);
+      const dayB = state.dayOf(b.date);
+      if (windowLength(dayA) < presenceFromPaid(b.paidMinutes)) continue;
+      if (windowLength(dayB) < presenceFromPaid(a.paidMinutes)) continue;
+
+      // 6-Tage-Regel für beide prüfen, jeweils ohne den eigenen alten Tag.
+      const trialA = new Set(workedA);
+      trialA.delete(a.date);
+      if (consecutiveRunLengthWith(trialA, b.date) > 6) continue;
+      const trialB = new Set(workedB);
+      trialB.delete(b.date);
+      if (consecutiveRunLengthWith(trialB, a.date) > 6) continue;
+
+      const dsA = state.dateState.get(a.date)!;
+      const dsB = state.dateState.get(b.date)!;
+      const targetA = state.rawTarget.get(a.date)!;
+      const targetB = state.rawTarget.get(b.date)!;
+      const oldCost =
+        Math.abs(dsA.totalPaid - targetA) + Math.abs(dsB.totalPaid - targetB);
+      const newCost =
+        Math.abs(dsA.totalPaid - a.paidMinutes + b.paidMinutes - targetA) +
+        Math.abs(dsB.totalPaid - b.paidMinutes + a.paidMinutes - targetB);
+      if (newCost >= oldCost - 1e-6) continue; // nur echte Verbesserungen
+
+      const dateA = a.date;
+      const dateB = b.date;
+      const paidA = a.paidMinutes;
+      const paidB = b.paidMinutes;
+      removeShift(state, a);
+      removeShift(state, b);
+      applyShift(state, makeShift(state, empA, dateB, paidA));
+      applyShift(state, makeShift(state, empB, dateA, paidB));
+      improved = true;
+      break; // a existiert nicht mehr – mit dem nächsten a weitermachen
+    }
+  }
+
+  return improved;
 }
 
 /** Dreht NUR Früh/Spät um. Dauer bleibt gleich => Monats-Soll bleibt exakt. */
@@ -512,43 +626,6 @@ function balanceShiftTypes(state: SchedulerState): void {
       retypeShift(state, best, best.shiftType === "LATE" ? "EARLY" : "LATE");
     }
 
-    // 1b. Mittagsspitze absichern. Ohne diesen Schritt entstand ein reiner
-    //     Anstieg über den Tag – mittags stand nur eine Person im Laden, alle
-    //     anderen kamen erst nachmittags/abends. Ein echter Plan hat auch
-    //     mittags ein Team. Wir drehen dazu die LÄNGSTEN Spätschichten auf Früh:
-    //     als Frühschicht decken sie den Mittag ab und reichen (8 h => 11–20)
-    //     weiterhin bis in die Abendspitze, sodass der Abend die stärkere
-    //     Spitze bleibt. Gedreht wird nur der Typ, nie die Dauer => Soll exakt.
-    const lunchInWindow =
-      day.window.startMinutes <= LUNCH_PROBE && day.window.endMinutes > LUNCH_PROBE;
-    if (lunchInWindow && onDay.length >= 3) {
-      const lunchGoal = lunchTargetFor(onDay.length);
-      for (let guard = 0; guard < onDay.length; guard++) {
-        if (coverageAt(onDay, LUNCH_PROBE) >= lunchGoal) break;
-        const candidates = onDay
-          .filter(
-            (s) =>
-              s.shiftType === "LATE" &&
-              !(s.startMinutes <= LUNCH_PROBE && s.endMinutes > LUNCH_PROBE),
-          )
-          .sort((a, b) => b.paidMinutes - a.paidMinutes); // längste zuerst
-        let flipped = false;
-        for (const c of candidates) {
-          retypeShift(state, c, "EARLY");
-          const stillCloses = onDay.some((s) => s.endMinutes === day.window.endMinutes);
-          // Nur behalten, wenn weiterhin jemand bis zum Schließen bleibt.
-          // (Dong Do ist mittagslastig – der Mittag darf ruhig die stärkere
-          // Spitze sein; wir müssen den Abend nicht künstlich größer halten.)
-          if (stillCloses) {
-            flipped = true;
-            break;
-          }
-          retypeShift(state, c, "LATE");
-        }
-        if (!flipped) break;
-      }
-    }
-
     // 2. Öffnen/Schließen sichern. Mit nur einer Schicht am Tag geht beides
     //    nicht – dann bleibt es bei der Quote-Entscheidung.
     if (onDay.length < 2) continue;
@@ -570,6 +647,46 @@ function balanceShiftTypes(state: SchedulerState): void {
       );
       if (victim) retypeShift(state, victim, "LATE");
     }
+
+    // 3. Stoßzeiten absichern (12–13 und 17–19 Uhr, je mindestens 2 Personen).
+    //    Vorher deckte dieser Schritt nur einen Messpunkt zur Mittagszeit ab;
+    //    der Abend war ungeprüft. Jetzt wird über beide Spannen die KLEINSTE
+    //    Besetzung geprüft, nicht ein einzelner Zeitpunkt.
+    //
+    //    Zur Mechanik: Frühschichten hängen am Öffnen, Spätschichten am
+    //    Schließen. Damit deckt jede Frühschicht den Mittag und jede
+    //    Spätschicht den Abend; beide Spitzen zugleich schafft nur eine lange
+    //    Schicht (8/9 h). Gedreht wird ausschließlich der Typ, nie die Dauer –
+    //    das Monats-Soll bleibt exakt. Reicht die Tagesmasse nicht aus, bleibt
+    //    eine Lücke bestehen; sie ist in analyzeSchedule sichtbar.
+    const hasOpener = () => onDay.some((s) => s.startMinutes === day.window.startMinutes);
+    const hasCloser = () => onDay.some((s) => s.endMinutes === day.window.endMinutes);
+
+    for (let guard = 0; guard < onDay.length * 3; guard++) {
+      const deficit = peakDeficit(onDay, day.window);
+      if (deficit === 0) break;
+
+      let best: Shift | null = null;
+      let bestDeficit = deficit;
+      for (const s of onDay) {
+        // shiftType kennt zusätzlich "CUSTOM"; erzeugte Schichten sind immer
+        // EARLY oder LATE. Für die Probe wird alles andere wie EARLY behandelt.
+        const back: TemplateType = s.shiftType === "LATE" ? "LATE" : "EARLY";
+        const target: TemplateType = back === "LATE" ? "EARLY" : "LATE";
+        retypeShift(state, s, target);
+        // Öffnen/Schließen darf die Spitzenreparatur nicht kaputt machen.
+        const ok = hasOpener() && hasCloser();
+        const next = ok ? peakDeficit(onDay, day.window) : Number.POSITIVE_INFINITY;
+        retypeShift(state, s, back);
+        if (next < bestDeficit) {
+          bestDeficit = next;
+          best = s;
+        }
+      }
+
+      if (!best) break; // keine Drehung verbessert noch etwas
+      retypeShift(state, best, best.shiftType === "LATE" ? "EARLY" : "LATE");
+    }
   }
 }
 
@@ -582,7 +699,7 @@ function balanceShiftTypes(state: SchedulerState): void {
 function monthCapacity(
   dates: string[],
   dayOf: (isoDate: string) => ResolvedDay,
-  capHours = 8,
+  capHours = MAX_SHIFT_HOURS,
 ): { openDays: number; maxDays: number; maxMinutes: number } {
   let openDays = 0;
   let maxDays = 0;
@@ -597,7 +714,7 @@ function monthCapacity(
     }
     openDays += 1;
     const hours = Math.min(maxShiftHoursForWindow(windowLength(day)), capHours);
-    if (hours < 4) continue; // Fenster zu kurz für die kürzeste Schicht
+    if (hours < 3) continue; // Fenster zu kurz für die kürzeste Schicht (3 h)
 
     if (run >= 6) {
       run = 0; // Pflicht-Ruhetag
@@ -635,7 +752,7 @@ function buildUnmetMessage(
     return (
       `Không xếp được ca nào (${missing}). ` +
       `Tháng này có ${full.openDays} ngày mở cửa nhưng khung giờ làm quá ngắn — ` +
-      `không đủ cho cả ca ngắn nhất (4h). Hãy nới khung giờ làm ở tab Cài đặt.`
+      `không đủ cho cả ca ngắn nhất (3h). Hãy nới khung giờ làm ở tab Cài đặt.`
     );
   }
 

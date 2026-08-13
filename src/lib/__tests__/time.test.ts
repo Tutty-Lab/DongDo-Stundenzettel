@@ -28,11 +28,16 @@ describe("timeToMinutes / minutesToTime", () => {
 });
 
 describe("calculatePause", () => {
-  it("immer 0 – Dong Do zieht keine Pause ab", () => {
+  it("kurze Schichten (3..7 h) bleiben ohne Pause", () => {
     expect(calculatePause(3 * 60)).toBe(0);
     expect(calculatePause(6 * 60)).toBe(0);
     expect(calculatePause(7 * 60)).toBe(0);
-    expect(calculatePause(8 * 60)).toBe(0);
+    // knapp unter 8 h zählt noch als kurz
+    expect(calculatePause(7 * 60 + 59)).toBe(0);
+  });
+  it("lange Schichten (8 h und 9 h) bekommen 60 Minuten", () => {
+    expect(calculatePause(8 * 60)).toBe(60);
+    expect(calculatePause(9 * 60)).toBe(60);
   });
 });
 
@@ -42,11 +47,15 @@ describe("calculatePaidMinutes / presenceFromPaid", () => {
     expect(calculatePaidMinutes(720, 1200, 0)).toBe(480);
     // 16:00-20:00, keine Pause => 4 h
     expect(calculatePaidMinutes(960, 1200, 0)).toBe(240);
+    // 10:00-19:00 mit 60 min Pause => 8 h bezahlt
+    expect(calculatePaidMinutes(600, 1140, 60)).toBe(480);
   });
-  it("presence = paid (keine Pause)", () => {
-    expect(presenceFromPaid(480)).toBe(480); // 8h
-    expect(presenceFromPaid(240)).toBe(240); // 4h
-    expect(presenceFromPaid(180)).toBe(180); // 3h
+  it("presence = paid + Pause", () => {
+    expect(presenceFromPaid(180)).toBe(180); // 3 h, keine Pause
+    expect(presenceFromPaid(240)).toBe(240); // 4 h, keine Pause
+    expect(presenceFromPaid(420)).toBe(420); // 7 h, keine Pause
+    expect(presenceFromPaid(480)).toBe(540); // 8 h + 60 min = 9 h Anwesenheit
+    expect(presenceFromPaid(540)).toBe(600); // 9 h + 60 min = 10 h Anwesenheit
   });
 });
 

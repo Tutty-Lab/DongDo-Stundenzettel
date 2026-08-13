@@ -60,8 +60,8 @@ function audit(shifts: Shift[], employees: Employee[], year: number, overrides: 
     if (s.endMinutes - s.startMinutes - s.pauseMinutes !== s.paidMinutes) {
       problems.push(`${s.date}/${s.employeeId}: giờ công không khớp`);
     }
-    if (s.paidMinutes < 3 * 60 || s.paidMinutes > 8 * 60) {
-      problems.push(`${s.date}/${s.employeeId}: ca ${s.paidMinutes / 60}h ngoài 3..8h`);
+    if (s.paidMinutes < 3 * 60 || s.paidMinutes > 9 * 60) {
+      problems.push(`${s.date}/${s.employeeId}: ca ${s.paidMinutes / 60}h ngoài 3..9h`);
     }
   }
 

@@ -17,8 +17,8 @@ export type ShiftTemplate = {
   type: TemplateType;
 };
 
-/** Erlaubte Schichtlängen in Stunden (Dong Do: ab 3 h). */
-export const SHIFT_LENGTHS = [3, 4, 5, 6, 7, 8] as const;
+/** Erlaubte Schichtlängen in Stunden (Dong Do: 3 h bis 9 h bezahlt). */
+export const SHIFT_LENGTHS = [3, 4, 5, 6, 7, 8, 9] as const;
 
 const DEFAULT_OPEN = 10 * 60; // 10:00
 const DEFAULT_CLOSE = 22 * 60; // 22:00
@@ -45,7 +45,7 @@ function isDefaultHours(openMinutes: number, closeMinutes: number): boolean {
 
 /**
  * Liefert die Vorlage für eine bezahlte Stundenzahl und Früh/Spät.
- * @param paidHours 4..8
+ * @param paidHours 3..9
  */
 export function getShiftTemplate(
   paidHours: number,
@@ -60,7 +60,12 @@ export function getShiftTemplate(
   let startMinutes: number;
   let endMinutes: number;
 
-  if (isDefaultHours(openMinutes, closeMinutes) && SPEC_EARLY[paidHours]) {
+  // Die SPEC-Tabellen stammen aus der pausenlosen Fassung: dort galt
+  // presence = paid, die Endzeiten sind entsprechend gerechnet. Seit 8-/9-h-
+  // Schichten 60 min Pause haben, würden sie für diese Längen eine falsche
+  // Anwesenheit liefern (Validierung: paid != end - start - pause). Deshalb
+  // gelten sie nur noch für pausenfreie Längen; alles andere geht generisch.
+  if (pauseMinutes === 0 && isDefaultHours(openMinutes, closeMinutes) && SPEC_EARLY[paidHours]) {
     const spec = type === "EARLY" ? SPEC_EARLY[paidHours] : SPEC_LATE[paidHours];
     [startMinutes, endMinutes] = spec;
   } else if (type === "EARLY") {

@@ -27,7 +27,7 @@ export type ValidationResult = {
   summaries: EmployeeSummary[];
 };
 
-const MAX_PAID_MINUTES = 8 * 60;
+const MAX_PAID_MINUTES = 9 * 60;
 const MAX_CONSECUTIVE_DAYS = 6;
 
 export function validateSchedule(
@@ -61,7 +61,7 @@ export function validateSchedule(
       errors.push({
         employeeId: shift.employeeId,
         date: shift.date,
-        message: `Quá 8 giờ công ngày ${shift.date}.`,
+        message: `Quá 9 giờ công ngày ${shift.date}.`,
       });
     }
     if (shift.paidMinutes !== expectedPaid) {

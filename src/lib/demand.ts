@@ -21,11 +21,11 @@ export type WeekdayKey =
  */
 export const DAY_WEIGHTS: Record<WeekdayKey, number> = {
   monday: 1.0, // ruhig
-  tuesday: 1.6,
-  wednesday: 1.6,
-  thursday: 1.7,
-  friday: 1.8,
-  saturday: 1.7,
+  tuesday: 1.3,
+  wednesday: 1.3,
+  thursday: 1.4,
+  friday: 1.5,
+  saturday: 1.5,
   sunday: 1.0, // geschlossen (Gewicht nur relevant, falls doch geöffnet)
 };
 

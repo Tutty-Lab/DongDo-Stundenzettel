@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { chooseShiftHours, maxShiftHoursForWindow } from "../scheduler";
 
 describe("maxShiftHoursForWindow", () => {
-  it("liefert die längste passende Schicht fürs Zeitfenster (ohne Pause)", () => {
-    expect(maxShiftHoursForWindow(10 * 60)).toBe(8); // 10:00–20:00
-    expect(maxShiftHoursForWindow(8 * 60)).toBe(8); // exakt 8 h Anwesenheit passt
-    expect(maxShiftHoursForWindow(8 * 60 - 1)).toBe(7); // knapp zu kurz für die 8-h-Schicht
+  it("rechnet mit Anwesenheit inkl. Pause, nicht mit bezahlter Zeit", () => {
+    // 8-/9-h-Schichten brauchen 60 min Pause obendrauf: 9 h bezahlt = 10 h da.
+    expect(maxShiftHoursForWindow(10 * 60)).toBe(9); // 10:00–20:00 fasst die 9-h-Schicht exakt
+    expect(maxShiftHoursForWindow(10 * 60 - 1)).toBe(8); // knapp zu kurz => 8 h (9 h Anwesenheit)
+    expect(maxShiftHoursForWindow(9 * 60)).toBe(8);
+    expect(maxShiftHoursForWindow(9 * 60 - 1)).toBe(7); // 7 h ist die längste pausenfreie
+    expect(maxShiftHoursForWindow(7 * 60)).toBe(7);
     expect(maxShiftHoursForWindow(5 * 60)).toBe(5); // halber Tag
     expect(maxShiftHoursForWindow(3 * 60)).toBe(3); // kurze 3-h-Schicht passt
     expect(maxShiftHoursForWindow(3 * 60 - 1)).toBe(0); // zu kurz für 3 h
@@ -20,7 +23,8 @@ describe("chooseShiftHours – Schicht passt sich dem Tag an", () => {
     expect(hours).toBeLessThanOrEqual(5);
   });
 
-  it("Vollzeit nimmt an normalen Tagen die 8-h-Schicht", () => {
+  it("Vollzeit nimmt an normalen Tagen die längste passende Schicht", () => {
+    expect(chooseShiftHours(176 * 60, 9, "VOLLZEIT")).toBe(9);
     expect(chooseShiftHours(176 * 60, 8, "VOLLZEIT")).toBe(8);
   });
 
