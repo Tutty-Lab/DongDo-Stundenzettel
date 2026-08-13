@@ -13,3 +13,4 @@ dist-ssr
 !.vscode/extensions.json
 .claude/
 *.tsbuildinfo
+.env*

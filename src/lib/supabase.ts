@@ -7,7 +7,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 /** Kennung dieser Filiale = Schlüssel der Zeile in store_data. */
-export const STORE_ID = "namchi";
+export const STORE_ID = "dongdo";
 
 // Beide Schreibweisen akzeptieren: VITE_* (selbst gesetzt) und NEXT_PUBLIC_*
 // (so legt die Vercel-Supabase-Integration die öffentlichen Schlüssel an).
