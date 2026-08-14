@@ -243,37 +243,141 @@ export function shiftHoursForPresence(presenceMinutes: number): number {
  * egal wie man sie schiebt.
  */
 function peakFloorMinutes(day: ResolvedDay): number {
-  const hours = peakCapableHours(day);
-  return hours === 0 ? 0 : peakMinStaff() * hours * 60;
+  if (day.closed) return 0;
+  return cheapestPeakCover(day.window).reduce((sum, h) => sum + h * 60, 0);
+}
+
+const coverCache = new Map<string, number[]>();
+
+/**
+ * Billigste Kombination von Schichtlängen, mit der ein Tag ALLES erfüllt:
+ * jemand sperrt auf, jemand sperrt zu, und die Stoßzeit ist durchgehend
+ * besetzt. Ergebnis in Stunden, absteigend. Leer = gar nicht abdeckbar.
+ *
+ * Warum gesucht statt gerechnet: die naheliegende Formel „jeder Dienst muss
+ * vom Öffnen bis zum Ende der Stoßzeit reichen" ergibt bei 10–20 Uhr und
+ * Stoßzeit 12–18 Uhr zweimal 8 h = 16 h. Billiger geht es aber mit 9 h + 6 h
+ * = 15 h: der 9-h-Dienst füllt das ganze Fenster und erledigt Aufsperren,
+ * Zusperren und Stoßzeit in einem, der 6-h-Dienst stellt sich einfach mitten
+ * hinein. Solche Kombinationen findet man nur, wenn man sie durchprobiert –
+ * und zwar mit derselben Anordnungslogik, die später auch real läuft.
+ */
+export function cheapestPeakCover(window: DayWindow): number[] {
+  const key = `${window.startMinutes}-${window.endMinutes}`;
+  const cached = coverCache.get(key);
+  if (cached) return cached;
+
+  const span = window.endMinutes - window.startMinutes;
+  const usable = ALL_HOURS.filter((h) => presenceFromPaid(h * 60) <= span);
+
+  let found: number[] = [];
+  // Nach Anzahl der Dienste aufsteigend, innerhalb nach Gesamtstunden.
+  for (let count = 1; count <= 4 && found.length === 0; count++) {
+    let bestTotal = Number.POSITIVE_INFINITY;
+    let best: number[] | null = null;
+    const combo: number[] = [];
+
+    const recurse = (from: number) => {
+      if (combo.length === count) {
+        const total = combo.reduce((a, b) => a + b, 0);
+        if (total < bestTotal && canCoverDay(window, combo)) {
+          bestTotal = total;
+          best = [...combo];
+        }
+        return;
+      }
+      for (let i = from; i < usable.length; i++) {
+        combo.push(usable[i]);
+        recurse(i); // Wiederholungen erlaubt
+        combo.pop();
+      }
+    };
+    recurse(0);
+
+    if (best) found = (best as number[]).slice().sort((a, b) => b - a);
+  }
+
+  coverCache.set(key, found);
+  return found;
+}
+
+/** Lässt sich der Tag mit genau diesen Längen vollständig abdecken? */
+function canCoverDay(window: DayWindow, hours: number[]): boolean {
+  const probe: Shift[] = hours.map((h, i) => ({
+    id: `probe-${i}`,
+    employeeId: `probe-${i}`,
+    date: "probe",
+    startMinutes: window.startMinutes,
+    endMinutes: window.startMinutes + presenceFromPaid(h * 60),
+    pauseMinutes: h * 60 - h * 60 + (presenceFromPaid(h * 60) - h * 60),
+    paidMinutes: h * 60,
+    shiftType: "EARLY",
+    generated: true,
+  }));
+
+  arrangeForPeaks(window, probe);
+
+  const opens = probe.some((s) => s.startMinutes === window.startMinutes);
+  const closes = probe.some((s) => s.endMinutes === window.endMinutes);
+  return opens && closes && peakDeficit(probe, window) === 0;
+}
+
+/** Bezahlte Stunden aller Dienste eines Tages. */
+function dayPaidHours(state: SchedulerState, isoDate: string): number[] {
+  const out: number[] = [];
+  for (const s of state.shifts) if (s.date === isoDate) out.push(s.paidMinutes / 60);
+  return out;
 }
 
 /**
- * Wie lang muss EIN Dienst sein, damit er eine Stoßzeit vollständig abdecken
- * kann? Maßgeblich ist der ungünstigere der beiden Anker (Öffnen bzw.
- * Schließen). 0 = an diesem Tag gibt es keine Stoßzeit zu decken.
- *
- * Das ist eine Aussage über die LÄNGE, nicht über die Lage: wo der Dienst am
- * Ende liegt, entscheidet layoutDayForPeaks. Ein Tag mit genug Stunden, aber
- * lauter zu kurzen Diensten (z.B. 16 h als 7 h + 9 h) bekommt die Stoßzeit
- * trotzdem nicht besetzt – die 7-h-Frühschicht endet um 17:30.
+ * Wie viele Anforderungen der billigsten Abdeckung deckt diese Menge von
+ * Schichtlängen ab? Lange Dienste werden zuerst auf die größte offene
+ * Anforderung gelegt.
  */
-function peakCapableHours(day: ResolvedDay): number {
-  if (day.closed) return 0;
-  let hours = 0;
-  for (const peak of PEAK_WINDOWS) {
-    const from = Math.max(peak.startMinutes, day.window.startMinutes);
-    const to = Math.min(peak.endMinutes, day.window.endMinutes);
-    if (to <= from) continue;
-    const neededPresence = Math.max(to - day.window.startMinutes, day.window.endMinutes - from);
-    const h = shiftHoursForPresence(Math.min(neededPresence, windowLength(day)));
-    if (h > hours) hours = h;
+function coverFilledBy(cover: readonly number[], hours: number[]): number {
+  const need = [...cover];
+  let filled = 0;
+  for (const h of [...hours].sort((a, b) => b - a)) {
+    const idx = need.findIndex((n) => h >= n);
+    if (idx >= 0) {
+      need.splice(idx, 1);
+      filled++;
+    }
   }
-  return hours;
+  return filled;
 }
 
-/** Höchste geforderte Mindestbesetzung über alle Stoßzeiten. */
-function peakMinStaff(): number {
-  return PEAK_WINDOWS.reduce((max, p) => Math.max(max, p.minStaff), 0);
+/** Abdeckung eines Tages, wenn er GENAU diese Schichtlängen hätte. */
+function coverFilledFor(state: SchedulerState, isoDate: string, hours: number[]): number {
+  const day = state.dayOf(isoDate);
+  if (day.closed) return Number.POSITIVE_INFINITY;
+  const cover = cheapestPeakCover(day.window);
+  if (cover.length === 0) return Number.POSITIVE_INFINITY;
+  return coverFilledBy(cover, hours);
+}
+
+/** Wie viele Dienste verlangt die billigste Abdeckung an diesem Tag? */
+function coverSize(state: SchedulerState, isoDate: string): number {
+  const day = state.dayOf(isoDate);
+  if (day.closed) return 0;
+  return cheapestPeakCover(day.window).length;
+}
+
+/**
+ * Welche Länge fehlt diesem Tag noch, um die billigste Abdeckung zu erreichen?
+ * 0 = der Tag hat schon genug passende Dienste.
+ */
+function missingCoverHours(state: SchedulerState, isoDate: string): number {
+  const day = state.dayOf(isoDate);
+  if (day.closed) return 0;
+  const need = [...cheapestPeakCover(day.window)];
+  if (need.length === 0) return 0;
+
+  for (const h of dayPaidHours(state, isoDate).sort((a, b) => b - a)) {
+    const idx = need.findIndex((n) => h >= n);
+    if (idx >= 0) need.splice(idx, 1);
+  }
+  return need.length === 0 ? 0 : Math.max(...need);
 }
 
 /**
@@ -468,15 +572,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     // decken, wird die Mindestlänge hochgezogen. Ohne das entstehen Tage mit
     // rechnerisch genug Stunden, aber falscher Aufteilung (16 h als 7 + 9),
     // und die Stoßzeit bleibt unbesetzt – verschieben hilft dann nicht mehr.
-    const peakHours = peakCapableHours(day);
-    let stillNeedsLong = 0;
-    if (peakHours > 0) {
-      let longEnough = 0;
-      for (const s of state.shifts) {
-        if (s.date === isoDate && s.paidMinutes >= peakHours * 60) longEnough++;
-      }
-      if (longEnough < peakMinStaff()) stillNeedsLong = peakHours;
-    }
+    const stillNeedsLong = missingCoverHours(state, isoDate);
 
     const hours = chooseShiftHours(
       remaining,
@@ -527,36 +623,16 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
 }
 
 /**
- * Wie viele Dienste an diesem Tag sind lang genug, um die Stoßzeit zu decken?
- * Unendlich, wenn der Tag gar keine Stoßzeit hat – dann ist die Zahl egal.
- */
-function peakCapableCount(state: SchedulerState, isoDate: string): number {
-  const need = peakCapableHours(state.dayOf(isoDate));
-  if (need === 0) return Number.POSITIVE_INFINITY;
-  let n = 0;
-  for (const s of state.shifts) {
-    if (s.date === isoDate && s.paidMinutes >= need * 60) n++;
-  }
-  return n;
-}
-
-/** Ist dieser Dienst lang genug für die Stoßzeit an diesem Tag? */
-function isPeakCapable(state: SchedulerState, isoDate: string, paidMinutes: number): boolean {
-  const need = peakCapableHours(state.dayOf(isoDate));
-  return need > 0 && paidMinutes >= need * 60;
-}
-
-/**
- * Darf sich die Zahl der stoßzeittauglichen Dienste so ändern?
+ * Darf sich die Abdeckung eines Tages so verändern?
  *
- * Erlaubt ist alles, was die geforderte Besetzung weiter trägt – und bei
+ * Erlaubt ist alles, was die geforderte Abdeckung weiter trägt – und bei
  * Tagen, die sie ohnehin nicht erreichen, alles, was nichts verschlimmert.
  * Ohne diese Schranke räumt der Reparaturlauf die Stoßzeit wieder ab: er
- * optimiert nur die Tagesstunden und schiebt fröhlich eine 7-h-Schicht auf
- * einen Tag, der zwei 8-h-Schichten braucht.
+ * optimiert nur die Tagesstunden und schiebt fröhlich einen zu kurzen Dienst
+ * auf einen Tag, der die Länge braucht.
  */
-function peakCapacityOk(oldCount: number, newCount: number): boolean {
-  return newCount >= Math.min(peakMinStaff(), oldCount);
+function peakCapacityOk(required: number, oldCount: number, newCount: number): boolean {
+  return newCount >= Math.min(required, oldCount);
 }
 
 /** Kosten eines Tages = |zugewiesene - rohe Soll-Minuten|. */
@@ -618,12 +694,28 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
         if (consecutiveRunLengthWith(trial, to) > 6) continue;
 
         // Die Stoßzeit darf durch einen Umzug nicht schlechter besetzbar werden.
-        const capFrom = peakCapableCount(state, from);
-        const capTo = peakCapableCount(state, to);
-        const leavesFrom = isPeakCapable(state, from, shift.paidMinutes) ? 1 : 0;
-        const arrivesTo = isPeakCapable(state, to, shift.paidMinutes) ? 1 : 0;
-        if (!peakCapacityOk(capFrom, capFrom - leavesFrom)) continue;
-        if (!peakCapacityOk(capTo, capTo + arrivesTo)) continue;
+        const hoursFrom = dayPaidHours(state, from);
+        const hoursTo = dayPaidHours(state, to);
+        const moved = shift.paidMinutes / 60;
+        const withoutMoved = hoursFrom.filter((_, i) => i !== hoursFrom.indexOf(moved));
+        if (
+          !peakCapacityOk(
+            coverSize(state, from),
+            coverFilledFor(state, from, hoursFrom),
+            coverFilledFor(state, from, withoutMoved),
+          )
+        ) {
+          continue;
+        }
+        if (
+          !peakCapacityOk(
+            coverSize(state, to),
+            coverFilledFor(state, to, hoursTo),
+            coverFilledFor(state, to, [...hoursTo, moved]),
+          )
+        ) {
+          continue;
+        }
 
         const oldCostTo = dateCost(state, to);
         const newCostFrom = Math.abs(
@@ -725,28 +817,34 @@ function repairPeakCapacity(state: SchedulerState, employeesById: Map<string, Em
     let improved = false;
 
     for (const isoDate of state.dates) {
-      const need = peakCapableHours(state.dayOf(isoDate));
-      if (need === 0) continue;
-      if (peakCapableCount(state, isoDate) >= peakMinStaff()) continue;
+      const needHours = missingCoverHours(state, isoDate);
+      if (needHours === 0) continue; // Tag ist versorgt
 
       // Kürzeste zuerst hergeben: die reißt die geringste Lücke.
       const tooShort = state.shifts
-        .filter((s) => s.date === isoDate && s.paidMinutes < need * 60)
+        .filter((s) => s.date === isoDate && s.paidMinutes < needHours * 60)
         .sort((x, y) => x.paidMinutes - y.paidMinutes);
 
       let swapped = false;
       for (const short of tooShort) {
         for (const long of [...state.shifts]) {
           if (long.date === isoDate) continue;
-          if (long.paidMinutes < need * 60) continue; // taugt hier nicht
+          if (long.paidMinutes < needHours * 60) continue; // taugt hier nicht
 
           // Der abgebende Tag darf dadurch nicht selbst unterversorgt werden.
-          const capDonor = peakCapableCount(state, long.date);
-          const donorNeed = peakCapableHours(state.dayOf(long.date));
-          const longCountsThere = donorNeed > 0 && long.paidMinutes >= donorNeed * 60;
-          const shortCountsThere = donorNeed > 0 && short.paidMinutes >= donorNeed * 60;
-          const newCapDonor = capDonor - (longCountsThere ? 1 : 0) + (shortCountsThere ? 1 : 0);
-          if (!peakCapacityOk(capDonor, newCapDonor)) continue;
+          const donorHours = dayPaidHours(state, long.date);
+          const afterDonor = donorHours
+            .filter((_, i) => i !== donorHours.indexOf(long.paidMinutes / 60))
+            .concat(short.paidMinutes / 60);
+          if (
+            !peakCapacityOk(
+              coverSize(state, long.date),
+              coverFilledFor(state, long.date, donorHours),
+              coverFilledFor(state, long.date, afterDonor),
+            )
+          ) {
+            continue;
+          }
 
           if (!canSwap(state, short, long)) continue;
 
@@ -800,18 +898,30 @@ function trySwaps(state: SchedulerState, employeesById: Map<string, Employee>): 
 
       // Auch der Tausch darf die Stoßzeit nicht abräumen: a landet auf b.date
       // und umgekehrt, die Längen wandern also mit.
-      const capA = peakCapableCount(state, a.date);
-      const capB = peakCapableCount(state, b.date);
-      const newCapA =
-        capA -
-        (isPeakCapable(state, a.date, a.paidMinutes) ? 1 : 0) +
-        (isPeakCapable(state, a.date, b.paidMinutes) ? 1 : 0);
-      const newCapB =
-        capB -
-        (isPeakCapable(state, b.date, b.paidMinutes) ? 1 : 0) +
-        (isPeakCapable(state, b.date, a.paidMinutes) ? 1 : 0);
-      if (!peakCapacityOk(capA, newCapA)) continue;
-      if (!peakCapacityOk(capB, newCapB)) continue;
+      const hoursA = dayPaidHours(state, a.date);
+      const hoursB = dayPaidHours(state, b.date);
+      const pa = a.paidMinutes / 60;
+      const pb = b.paidMinutes / 60;
+      const nextA = hoursA.filter((_, i) => i !== hoursA.indexOf(pa)).concat(pb);
+      const nextB = hoursB.filter((_, i) => i !== hoursB.indexOf(pb)).concat(pa);
+      if (
+        !peakCapacityOk(
+          coverSize(state, a.date),
+          coverFilledFor(state, a.date, hoursA),
+          coverFilledFor(state, a.date, nextA),
+        )
+      ) {
+        continue;
+      }
+      if (
+        !peakCapacityOk(
+          coverSize(state, b.date),
+          coverFilledFor(state, b.date, hoursB),
+          coverFilledFor(state, b.date, nextB),
+        )
+      ) {
+        continue;
+      }
 
       const dsA = state.dateState.get(a.date)!;
       const dsB = state.dateState.get(b.date)!;
@@ -1008,16 +1118,34 @@ function candidateStarts(shift: Shift, window: DayWindow): number[] {
 function layoutDayForPeaks(window: DayWindow, onDay: Shift[]): void {
   if (onDay.length < 2) return;
   if (peakDeficit(onDay, window) === 0) return; // schon gut
+  arrangeForPeaks(window, onDay);
+}
+
+/**
+ * Der eigentliche Suchlauf – ohne die Abkürzung oben. Wird auch von der
+ * Kapazitätsrechnung benutzt, die wissen muss, ob eine Kombination von
+ * Schichtlängen überhaupt aufgehen KANN.
+ */
+function arrangeForPeaks(window: DayWindow, onDay: Shift[]): void {
+  if (onDay.length < 2) return;
 
   const starts = onDay.map((s) => s.startMinutes);
   const restore = (list: number[]) => onDay.forEach((s, i) => moveShiftTo(s, list[i]));
+  const opensAndCloses = () =>
+    onDay.some((s) => s.startMinutes === window.startMinutes) &&
+    onDay.some((s) => s.endMinutes === window.endMinutes);
 
   let bestStarts = [...starts];
-  let bestDeficit = peakDeficit(onDay, window);
+  // Eine Ausgangslage ohne Auf- oder Zusperrer zählt nicht als Lösung.
+  let bestDeficit = opensAndCloses() ? peakDeficit(onDay, window) : Number.POSITIVE_INFINITY;
 
   for (let i = 0; i < onDay.length && bestDeficit > 0; i++) {
+    // i === j ist ausdrücklich erlaubt: ein Dienst, der das ganze Fenster
+    // füllt (bei 10–20 Uhr eine 9-h-Schicht), sperrt auf UND zu. Schließt man
+    // diesen Fall aus, findet die Suche nie die billigste Lösung – zwei
+    // getrennte Anker kosten hier 8 + 8 h, ein Dienst über alles plus ein
+    // frei stehender nur 9 + 6 h.
     for (let j = 0; j < onDay.length && bestDeficit > 0; j++) {
-      if (i === j) continue;
       restore(starts);
 
       // i sperrt auf, j sperrt zu.

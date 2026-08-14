@@ -1,5 +1,6 @@
 import type { UseScheduleReturn } from "../hooks/useSchedule";
-import { minutesToDecimalHours } from "../lib/time";
+import { minutesToDecimalHours, minutesToTime } from "../lib/time";
+import { PEAK_WINDOWS } from "../lib/scheduler";
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
@@ -65,8 +66,18 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
       */}
       {peakGaps.length > 0 && (
         <div className="mt-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          {/*
+            Fenster und Mindestbesetzung kommen aus PEAK_WINDOWS. Vorher stand
+            der Text fest im Code – nach der Umstellung auf eine durchgehende
+            Stoßzeit nannte die Warnung noch die alten Zeiten.
+          */}
           <div className="font-medium">
-            {peakGaps.length} ngày chưa đủ 2 người trong giờ cao điểm (12–13g và 17–19g).
+            {peakGaps.length} ngày chưa đủ người trong giờ cao điểm (
+            {PEAK_WINDOWS.map(
+              (p) =>
+                `${minutesToTime(p.startMinutes)}–${minutesToTime(p.endMinutes)}: ${p.minStaff} người`,
+            ).join(", ")}
+            ).
           </div>
           <div className="mt-1 space-y-0.5">
             {peakGaps.slice(0, 6).map((d) => (
@@ -74,7 +85,7 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
                 {shortDate(d.date)}{" "}
                 {d.peaks
                   .filter((p) => !p.ok)
-                  .map((p) => `${p.label === "Mittag" ? "trưa" : "chiều"}: ${p.minStaff}/${p.required}`)
+                  .map((p) => `${p.minStaff}/${p.required} người`)
                   .join(" · ")}{" "}
                 <span className="opacity-70">({d.shiftCount} ca, {d.paidHours}h)</span>
               </div>
