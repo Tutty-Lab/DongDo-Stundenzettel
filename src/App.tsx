@@ -108,10 +108,12 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
           {tab === "docs" && <DocsTab />}
         </div>
         {/*
-          Diese beiden Tabs enthalten einen Druckbereich und dürfen deshalb
-          NICHT in dem no-print-Container liegen: der wird beim Drucken auf
-          display:none gesetzt, und ein Kind kann das nicht zurücknehmen.
-          Beide blenden ihre Bedienelemente selbst aus.
+          „Bảng chấm công" enthält den Druckbereich (Stundenzettel UND
+          Dienstplan) und darf deshalb NICHT im no-print-Container liegen: der
+          wird beim Drucken auf display:none gesetzt, und ein Kind kann das
+          nicht zurücknehmen. Der Tab blendet seine Bedienelemente selbst aus.
+          Der Dienstplan liegt aus demselben Grund außerhalb – er bringt sein
+          eigenes no-print mit und bleibt so unabhängig von dieser Reihenfolge.
         */}
         {tab === "dienstplan" && <ScheduleTab store={store} />}
         {tab === "stundenzettel" && <StundenzettelTab store={store} />}

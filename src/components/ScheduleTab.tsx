@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Shift } from "../types";
 import {
@@ -15,8 +14,6 @@ import { isDayClosed } from "../lib/workHours";
 import { publicHolidays } from "../lib/holidays";
 import { ShiftCellEditor } from "./ShiftCellEditor";
 import { ScheduleDayView } from "./ScheduleDayView";
-import { SchedulePrintPage } from "./SchedulePrintPage";
-import { weeksOfMonth } from "../lib/weeks";
 
 function isWeekendKey(iso: string): boolean {
   const k = weekdayKeyOf(parseIsoDate(iso));
@@ -30,42 +27,10 @@ function cellClass(shift: Shift | undefined): string {
 }
 
 export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
-  const { schedule, validation, generate, genError, isLocked, markWeekPrinted, unlockMonth } =
-    store;
+  // Drucken (Monat/Woche) und Entsperren liegen im Tab „Bảng chấm công" –
+  // dort sitzt alles, was Papier erzeugt.
+  const { schedule, validation, generate, genError, isLocked } = store;
   const [selected, setSelected] = useState<{ employeeId: string; date: string } | null>(null);
-  // Was gerade gedruckt wird. Muss VOR window.print() gerendert sein, deshalb
-  // wird der Druck über flushSync angestoßen (siehe doPrint).
-  const [printRange, setPrintRange] = useState<{ dates: string[]; title: string } | null>(null);
-
-  const weeks = useMemo(
-    () => weeksOfMonth(schedule.year, schedule.month),
-    [schedule.year, schedule.month],
-  );
-
-  /**
-   * Wochen-Ausdruck sperrt den Monat. Der Monatsausdruck nicht: der dient als
-   * Übersicht, ausgehängt wird die Woche.
-   */
-  function printWeek(week: (typeof weeks)[number]) {
-    flushSync(() =>
-      setPrintRange({
-        dates: week.dates,
-        title: `Woche ${week.label} · ${monthLabel(schedule.year, schedule.month)}`,
-      }),
-    );
-    window.print();
-    markWeekPrinted(week.weekStart);
-  }
-
-  function printMonth() {
-    flushSync(() =>
-      setPrintRange({
-        dates,
-        title: monthLabel(schedule.year, schedule.month),
-      }),
-    );
-    window.print();
-  }
   // Mặc định: điện thoại -> xem theo ngày, màn lớn -> bảng tháng.
   const [view, setView] = useState<"grid" | "day">(() =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches ? "day" : "grid",
@@ -139,67 +104,16 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
         <span className="ml-auto text-sm text-slate-500">{monthLabel(schedule.year, schedule.month)}</span>
       </div>
 
-      {/* In lịch */}
-      {hasEmployees && schedule.shifts.length > 0 && (
-        <div className="no-print rounded-lg border border-slate-200 bg-white p-3 mb-3">
-          <div className="text-sm font-medium text-slate-700 mb-2">In lịch</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={printMonth}
-              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
-            >
-              Cả tháng
-            </button>
-            <span className="text-slate-300">|</span>
-            {weeks.map((w) => {
-              const printed = (schedule.printedWeeks ?? []).includes(w.weekStart);
-              return (
-                <button
-                  key={w.weekStart}
-                  onClick={() => printWeek(w)}
-                  className={`rounded border px-3 py-1.5 text-sm ${
-                    printed
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                      : "border-slate-300 bg-white hover:bg-slate-50"
-                  }`}
-                  title={printed ? "Tuần này đã in" : "In tuần này — sẽ khóa lịch tháng"}
-                >
-                  {w.label}
-                  {printed && " ✓"}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            In cả tháng chỉ để xem tổng thể, không khóa gì. <b>In một tuần bất kỳ sẽ khóa lịch
-            tháng này</b> để bản treo ở quán luôn khớp với dữ liệu trong hệ thống.
-          </p>
-        </div>
-      )}
-
-      {/* Trạng thái khóa */}
+      {/*
+        Nur ein kurzer Hinweis - Drucken und Entsperren sitzen im Tab
+        "Bang cham cong". Ohne diesen Hinweis klickt man hier auf eine Zelle
+        und nichts passiert, ohne zu erfahren warum.
+      */}
       {isLocked && (
-        <div className="no-print mb-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
-          <div className="font-medium">
-            Lịch tháng này đã khóa vì đã in
-            {schedule.lockedAt && ` lúc ${new Date(schedule.lockedAt).toLocaleString("vi-VN")}`}.
-          </div>
-          <div className="mt-0.5">
-            Không sửa được ca, không tạo lại lịch, không đổi nhân viên. Vẫn in được bình thường.
-          </div>
-          <button
-            onClick={() => {
-              const ok = window.confirm(
-                "Mở khóa lịch tháng này?\n\n" +
-                  "Bản đã in ở quán sẽ không còn khớp với hệ thống. " +
-                  "Sau khi sửa, hãy in lại tuần đó và thay bản cũ.",
-              );
-              if (ok) unlockMonth();
-            }}
-            className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
-          >
-            Mở khóa
-          </button>
+        <div className="mb-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          Lịch tháng này đã khóa vì đã in
+          {schedule.lockedAt && ` lúc ${new Date(schedule.lockedAt).toLocaleString("vi-VN")}`} — chỉ
+          xem, không sửa được. Muốn mở khóa thì sang tab <b>Bảng chấm công</b>.
         </div>
       )}
 
@@ -397,21 +311,6 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
           onClose={() => setSelected(null)}
         />
       )}
-      </div>
-
-      {/*
-        Druckbereich: am Bildschirm ausgeblendet (.print-area), beim Drucken
-        das Einzige, was übrig bleibt. Muss gerendert sein, BEVOR window.print()
-        läuft – deshalb setzt doPrint den Zustand mit flushSync.
-      */}
-      <div className="print-area">
-        {printRange && (
-          <SchedulePrintPage
-            schedule={schedule}
-            dates={printRange.dates}
-            title={printRange.title}
-          />
-        )}
       </div>
     </section>
   );

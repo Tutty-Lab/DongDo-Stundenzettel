@@ -1,14 +1,27 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee } from "../types";
 import { StundenzettelPage } from "./StundenzettelPage";
+import { SchedulePrintPage } from "./SchedulePrintPage";
 import { elementsToPdf, safeFileName } from "../lib/pdf";
+import { weeksOfMonth } from "../lib/weeks";
+import { datesOfMonth } from "../lib/demand";
+import { monthLabel } from "../lib/shiftOps";
 
 export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
-  const { schedule } = store;
+  const { schedule, isLocked, markWeekPrinted, unlockMonth } = store;
   const [selectedId, setSelectedId] = useState<string>(schedule.employees[0]?.id ?? "");
   const [printList, setPrintList] = useState<Employee[] | null>(null);
+  /** Dienstplan-Ausdruck (Monat oder Woche). Nie gleichzeitig mit printList. */
+  const [scheduleRange, setScheduleRange] = useState<{ dates: string[]; title: string } | null>(
+    null,
+  );
+
+  const weeks = useMemo(
+    () => weeksOfMonth(schedule.year, schedule.month),
+    [schedule.year, schedule.month],
+  );
   const [pdfList, setPdfList] = useState<Employee[] | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const pdfStage = useRef<HTMLDivElement>(null);
@@ -22,8 +35,26 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   // thao tác chạm (mobile chặn print ngoài gesture). flushSync render đồng bộ.
   function doPrint(list: Employee[]) {
     if (list.length === 0) return;
-    flushSync(() => setPrintList(list));
+    flushSync(() => {
+      setScheduleRange(null);
+      setPrintList(list);
+    });
     window.print();
+  }
+
+  /**
+   * Dienstplan drucken. Der Wochen-Ausdruck sperrt den Monat: das Blatt hängt
+   * danach im Laden und muss mit dem Stand im System übereinstimmen. Der
+   * Monatsausdruck ist nur eine Übersicht und sperrt nichts.
+   */
+  function printSchedule(dates: string[], title: string, weekStart?: string) {
+    if (dates.length === 0) return;
+    flushSync(() => {
+      setPrintList(null);
+      setScheduleRange({ dates, title });
+    });
+    window.print();
+    if (weekStart) markWeekPrinted(weekStart);
   }
 
   /**
@@ -64,6 +95,87 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     <>
       {/* Điều khiển (không in) */}
       <div className="no-print">
+        {/* ---- In lịch làm việc ---- */}
+        <div className="rounded-lg border border-slate-200 bg-white p-3 mb-4">
+          <div className="text-sm font-medium text-slate-700 mb-2">In lịch làm việc</div>
+          {schedule.shifts.length === 0 ? (
+            <p className="text-sm text-slate-400">Chưa có lịch. Sang tab „Lịch làm việc" để tạo.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() =>
+                    printSchedule(
+                      datesOfMonth(schedule.year, schedule.month),
+                      monthLabel(schedule.year, schedule.month),
+                    )
+                  }
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
+                >
+                  Cả tháng
+                </button>
+                <span className="text-slate-300">|</span>
+                {weeks.map((w) => {
+                  const printed = (schedule.printedWeeks ?? []).includes(w.weekStart);
+                  return (
+                    <button
+                      key={w.weekStart}
+                      onClick={() =>
+                        printSchedule(
+                          w.dates,
+                          `Woche ${w.label} · ${monthLabel(schedule.year, schedule.month)}`,
+                          w.weekStart,
+                        )
+                      }
+                      className={`rounded border px-3 py-1.5 text-sm ${
+                        printed
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : "border-slate-300 bg-white hover:bg-slate-50"
+                      }`}
+                      title={printed ? "Tuần này đã in" : "In tuần này — sẽ khóa lịch tháng"}
+                    >
+                      {w.label}
+                      {printed && " ✓"}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                In cả tháng chỉ để xem tổng thể, không khóa gì.{" "}
+                <b>In một tuần bất kỳ sẽ khóa lịch tháng này</b> để bản treo ở quán luôn khớp với
+                dữ liệu trong hệ thống.
+              </p>
+            </>
+          )}
+
+          {isLocked && (
+            <div className="mt-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+              <div className="font-medium">
+                Lịch tháng này đã khóa vì đã in
+                {schedule.lockedAt &&
+                  ` lúc ${new Date(schedule.lockedAt).toLocaleString("vi-VN")}`}
+                .
+              </div>
+              <div className="mt-0.5">
+                Không sửa được ca, không tạo lại lịch, không đổi nhân viên. Vẫn in được bình thường.
+              </div>
+              <button
+                onClick={() => {
+                  const ok = window.confirm(
+                    "Mở khóa lịch tháng này?\n\n" +
+                      "Bản đã in ở quán sẽ không còn khớp với hệ thống. " +
+                      "Sau khi sửa, hãy in lại tuần đó và thay bản cũ.",
+                  );
+                  if (ok) unlockMonth();
+                }}
+                className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
+              >
+                Mở khóa
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <label className="text-sm text-slate-600">Nhân viên:</label>
           <select
@@ -136,11 +248,19 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
         )}
       </div>
 
-      {/* Vùng in ẩn: mỗi nhân viên một trang */}
+      {/* Vùng in ẩn: hoặc các tờ chấm công, hoặc lịch làm việc */}
       <div className="print-area">
-        {(printList ?? []).map((emp) => (
-          <StundenzettelPage key={emp.id} schedule={schedule} employee={emp} />
-        ))}
+        {scheduleRange ? (
+          <SchedulePrintPage
+            schedule={schedule}
+            dates={scheduleRange.dates}
+            title={scheduleRange.title}
+          />
+        ) : (
+          (printList ?? []).map((emp) => (
+            <StundenzettelPage key={emp.id} schedule={schedule} employee={emp} />
+          ))
+        )}
       </div>
 
       {/* Sân khấu ngoài màn hình – chỉ có nội dung trong lúc tạo PDF */}
