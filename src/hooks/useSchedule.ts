@@ -184,19 +184,50 @@ export function useSchedule() {
     });
   }, []);
 
-  /** Merkt eine gedruckte Woche und sperrt den Monat beim ersten Mal. */
-  const markWeekPrinted = useCallback((weekStart: string) => {
-    setSchedule((s) => {
-      const weeks = s.printedWeeks ?? [];
-      const next = weeks.includes(weekStart) ? weeks : [...weeks, weekStart].sort();
-      return { ...s, printedWeeks: next, lockedAt: s.lockedAt ?? new Date().toISOString() };
-    });
+  /**
+   * Sofort speichern, ohne die Entprell-Zeit abzuwarten.
+   *
+   * Der normale Upload wartet eine Sekunde, damit nicht bei jedem Tastendruck
+   * geschrieben wird. Für Sperren und Entsperren ist das zu langsam: wer
+   * direkt nach dem Klick neu lädt oder die App wechselt, holt sich beim
+   * nächsten Start wieder den alten Stand aus der Datenbank – die Sperre wäre
+   * dann scheinbar von selbst zurückgekommen.
+   */
+  const pushNow = useCallback(async (state: PersistedState) => {
+    saveState(state);
+    if (!isRemoteConfigured || !hydrated.current) return;
+    setRemoteStatus("saving");
+    try {
+      await saveRemote(state);
+      setRemoteStatus("idle");
+    } catch {
+      setRemoteStatus("error");
+    }
   }, []);
+
+  /** Merkt eine gedruckte Woche und sperrt den Monat beim ersten Mal. */
+  const markWeekPrinted = useCallback(
+    (weekStart: string) => {
+      const current = latest.current;
+      const weeks = current.schedule.printedWeeks ?? [];
+      const next: Schedule = {
+        ...current.schedule,
+        printedWeeks: weeks.includes(weekStart) ? weeks : [...weeks, weekStart].sort(),
+        lockedAt: current.schedule.lockedAt ?? new Date().toISOString(),
+      };
+      setSchedule(next);
+      void pushNow({ ...current, schedule: next });
+    },
+    [pushNow],
+  );
 
   /** Sperre wieder aufheben (die Oberfläche fragt vorher nach). */
   const unlockMonth = useCallback(() => {
-    setSchedule((s) => ({ ...s, lockedAt: undefined }));
-  }, []);
+    const current = latest.current;
+    const next: Schedule = { ...current.schedule, lockedAt: undefined };
+    setSchedule(next);
+    void pushNow({ ...current, schedule: next });
+  }, [pushNow]);
 
   // ----- Mitarbeiter -----
   const addEmployee = useCallback(
