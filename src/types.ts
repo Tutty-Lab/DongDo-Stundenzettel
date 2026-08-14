@@ -51,6 +51,17 @@ export type Schedule = {
   dateOverrides: DateOverride[];
   employees: Employee[];
   shifts: Shift[];
+  /**
+   * Zeitpunkt der ersten Wochen-Ausgabe (ISO). Gesetzt = der Monat ist
+   * gesperrt und darf nicht mehr geändert werden.
+   *
+   * Hintergrund: sobald eine Woche ausgedruckt im Laden hängt, muss der Stand
+   * im System exakt dem Papier entsprechen – bei einer Kontrolle wird genau
+   * das verglichen. Entsperren geht nur bewusst über die Oberfläche.
+   */
+  lockedAt?: string;
+  /** Bereits gedruckte Wochen, als ISO-Datum des jeweiligen Montags. */
+  printedWeeks?: string[];
 };
 
 /** Ein einzelnes zu verplanendes Schicht-Token (Ergebnis von splitTargetHours). */

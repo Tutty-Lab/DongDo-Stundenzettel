@@ -79,7 +79,7 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, analysis }) => {
     expect(bad).toEqual([]);
   });
 
-  it("Gegenprobe Minute für Minute: 12–13 und 17–19 Uhr nie unter 2 Personen", () => {
+  it("Gegenprobe Minute für Minute: 12–18 Uhr nie unter 2 Personen", () => {
     // Unabhängig von minCoverageOver – stumpf jede Minute zählen. Wäre die
     // Abtastung dort falsch, meldete die Auswertung fälschlich „alles grün".
     const byDate = new Map<string, typeof shifts>();
@@ -91,10 +91,7 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, analysis }) => {
 
     const thin: string[] = [];
     for (const [date, onDay] of byDate) {
-      for (const [from, to, label] of [
-        [12 * 60, 13 * 60, "Mittag"],
-        [17 * 60, 19 * 60, "Abend"],
-      ] as const) {
+      for (const [from, to, label] of [[12 * 60, 18 * 60, "Stoßzeit"]] as const) {
         for (let t = from; t < to; t++) {
           const staff = onDay.filter((s) => s.startMinutes <= t && s.endMinutes > t).length;
           if (staff < 2) {

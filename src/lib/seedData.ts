@@ -25,47 +25,31 @@ export type SeedMonth = {
 };
 
 /**
- * Juni 2026 – kleine Stammbesetzung: 3 Vollzeit tragen den Laden,
- * 4 Teilzeit füllen die Spitzen auf.
+ * Der Laden hat DREI Beschäftigte. Das ist die eigentliche Härte: von 12 bis
+ * 18 Uhr müssen an jedem offenen Tag zwei davon gleichzeitig da sein, und die
+ * Sechs-Tage-Regel gilt weiter. Die drei Monate unterscheiden sich nur in der
+ * Besetzung und den Sollstunden – mehr Spielraum gibt es hier nicht.
  */
+
+/** Juni 2026 – Normalbetrieb, alle drei mit vollem Deputat. */
 const JUNE_2026: Employee[] = [
   makeEmployee("vz-hoa", "Nguyễn Thị Hoa", "VOLLZEIT", 176),
   makeEmployee("vz-minh", "Trần Văn Minh", "VOLLZEIT", 168),
   makeEmployee("vz-lan", "Phạm Thị Lan", "VOLLZEIT", 160),
-  makeEmployee("tz-an", "Lê Hoàng An", "TEILZEIT", 72),
-  makeEmployee("tz-binh", "Đỗ Thanh Bình", "TEILZEIT", 60),
-  makeEmployee("tz-chi", "Vũ Ngọc Chi", "TEILZEIT", 48),
-  makeEmployee("tz-dung", "Bùi Tiến Dũng", "TEILZEIT", 40),
 ];
 
-/**
- * Juli 2026 – Urlaubsmonat: eine Vollzeitkraft weniger, dafür mehr
- * Teilzeit-Aushilfen mit kleinen Deputaten. Der harte Fall für die
- * Stoßzeiten-Regel, weil viele kurze Schichten entstehen.
- */
+/** Juli 2026 – eine Kraft ist neu und startet mit kleinerem Deputat. */
 const JULY_2026: Employee[] = [
   makeEmployee("vz-hoa", "Nguyễn Thị Hoa", "VOLLZEIT", 180),
   makeEmployee("vz-minh", "Trần Văn Minh", "VOLLZEIT", 172),
-  makeEmployee("tz-an", "Lê Hoàng An", "TEILZEIT", 80),
-  makeEmployee("tz-chi", "Vũ Ngọc Chi", "TEILZEIT", 64),
-  makeEmployee("tz-em", "Ngô Thị Em", "TEILZEIT", 56),
-  makeEmployee("tz-giang", "Hoàng Văn Giang", "TEILZEIT", 45),
-  makeEmployee("tz-ha", "Đặng Thu Hà", "TEILZEIT", 36),
-  makeEmployee("tz-khanh", "Lý Gia Khánh", "TEILZEIT", 30),
+  makeEmployee("tz-an", "Lê Hoàng An", "TEILZEIT", 120),
 ];
 
-/**
- * August 2026 – volle Besetzung: 4 Vollzeit + 3 Teilzeit, deutlich mehr
- * Gesamtstunden. Hier muss die Nachfrage-Gewichtung sauber greifen.
- */
+/** August 2026 – andere Besetzung, insgesamt die meisten Stunden. */
 const AUGUST_2026: Employee[] = [
   makeEmployee("vz-hoa", "Nguyễn Thị Hoa", "VOLLZEIT", 184),
-  makeEmployee("vz-minh", "Trần Văn Minh", "VOLLZEIT", 176),
-  makeEmployee("vz-lan", "Phạm Thị Lan", "VOLLZEIT", 176),
-  makeEmployee("vz-son", "Trịnh Quang Sơn", "VOLLZEIT", 168),
-  makeEmployee("tz-an", "Lê Hoàng An", "TEILZEIT", 75),
-  makeEmployee("tz-binh", "Đỗ Thanh Bình", "TEILZEIT", 60),
-  makeEmployee("tz-chi", "Vũ Ngọc Chi", "TEILZEIT", 50),
+  makeEmployee("vz-son", "Trịnh Quang Sơn", "VOLLZEIT", 176),
+  makeEmployee("vz-lan", "Phạm Thị Lan", "VOLLZEIT", 168),
 ];
 
 /** Die drei zuletzt abgeschlossenen Monate, ältester zuerst. */

@@ -105,10 +105,15 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
         <div className="no-print">
           {tab === "einstellungen" && <SettingsTab store={store} />}
           {tab === "mitarbeiter" && <EmployeesTab store={store} />}
-          {tab === "dienstplan" && <ScheduleTab store={store} />}
           {tab === "docs" && <DocsTab />}
         </div>
-        {/* Bảng chấm công chứa vùng in – luôn render khi tab active */}
+        {/*
+          Diese beiden Tabs enthalten einen Druckbereich und dürfen deshalb
+          NICHT in dem no-print-Container liegen: der wird beim Drucken auf
+          display:none gesetzt, und ein Kind kann das nicht zurücknehmen.
+          Beide blenden ihre Bedienelemente selbst aus.
+        */}
+        {tab === "dienstplan" && <ScheduleTab store={store} />}
         {tab === "stundenzettel" && <StundenzettelTab store={store} />}
       </main>
     </div>

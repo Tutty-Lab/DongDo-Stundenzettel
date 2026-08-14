@@ -54,6 +54,8 @@ function normalizeSchedule(raw: Schedule | undefined): Schedule {
     dateOverrides: Array.isArray(raw.dateOverrides) ? raw.dateOverrides : [],
     employees: raw.employees ?? [],
     shifts: raw.shifts ?? [],
+    lockedAt: raw.lockedAt,
+    printedWeeks: Array.isArray(raw.printedWeeks) ? raw.printedWeeks : [],
   };
 }
 
@@ -159,9 +161,41 @@ export function useSchedule() {
     schedule.shifts,
   ]);
 
+  /**
+   * Gesperrt = eine Woche dieses Monats wurde bereits ausgedruckt. Ab da darf
+   * sich am Plan nichts mehr ändern, sonst weicht das Papier im Laden vom
+   * Stand im System ab. Alle ändernden Aktionen prüfen das selbst – die
+   * Oberfläche allein zu deaktivieren würde die Regel nicht durchsetzen.
+   */
+  const isLocked = Boolean(schedule.lockedAt);
+
   // ----- Firma / Monat / Öffnungszeiten -----
   const updateMeta = useCallback((patch: Partial<Schedule>) => {
-    setSchedule((s) => ({ ...s, ...patch }));
+    setSchedule((s) => {
+      // Ein Monatswechsel beginnt einen neuen Plan: die Sperre des alten
+      // Monats darf nicht mitwandern.
+      const monthChanged =
+        (patch.year !== undefined && patch.year !== s.year) ||
+        (patch.month !== undefined && patch.month !== s.month);
+      if (monthChanged) {
+        return { ...s, ...patch, lockedAt: undefined, printedWeeks: [] };
+      }
+      return { ...s, ...patch };
+    });
+  }, []);
+
+  /** Merkt eine gedruckte Woche und sperrt den Monat beim ersten Mal. */
+  const markWeekPrinted = useCallback((weekStart: string) => {
+    setSchedule((s) => {
+      const weeks = s.printedWeeks ?? [];
+      const next = weeks.includes(weekStart) ? weeks : [...weeks, weekStart].sort();
+      return { ...s, printedWeeks: next, lockedAt: s.lockedAt ?? new Date().toISOString() };
+    });
+  }, []);
+
+  /** Sperre wieder aufheben (die Oberfläche fragt vorher nach). */
+  const unlockMonth = useCallback(() => {
+    setSchedule((s) => ({ ...s, lockedAt: undefined }));
   }, []);
 
   // ----- Mitarbeiter -----
@@ -173,28 +207,38 @@ export function useSchedule() {
         employmentType,
         targetMinutes: Math.round(targetHours) * 60,
       };
-      setSchedule((s) => ({ ...s, employees: [...s.employees, emp] }));
+      setSchedule((s) => {
+        if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+        return { ...s, employees: [...s.employees, emp] };
+      });
     },
     [],
   );
 
   const updateEmployee = useCallback((id: string, patch: Partial<Employee>) => {
-    setSchedule((s) => ({
-      ...s,
-      employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-    }));
+    setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+      return {
+        ...s,
+        employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+      };
+    });
   }, []);
 
   const removeEmployee = useCallback((id: string) => {
-    setSchedule((s) => ({
-      ...s,
-      employees: s.employees.filter((e) => e.id !== id),
-      shifts: s.shifts.filter((sh) => sh.employeeId !== id),
-    }));
+    setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+      return {
+        ...s,
+        employees: s.employees.filter((e) => e.id !== id),
+        shifts: s.shifts.filter((sh) => sh.employeeId !== id),
+      };
+    });
   }, []);
 
   // ----- Generierung -----
   const generate = useCallback(() => {
+    if (isLocked) return;
     setGenError(null);
     try {
       const shifts = generateSchedule({
@@ -215,10 +259,14 @@ export function useSchedule() {
     schedule.workHours,
     schedule.dateOverrides,
     schedule.employees,
+    isLocked,
   ]);
 
   const resetToOriginal = useCallback(() => {
-    setSchedule((s) => ({ ...s, shifts: originalShifts.map((sh) => ({ ...sh })) }));
+    setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+      return { ...s, shifts: originalShifts.map((sh) => ({ ...sh })) };
+    });
   }, [originalShifts]);
 
   const resetAll = useCallback(() => {
@@ -260,10 +308,13 @@ export function useSchedule() {
       shiftId: string,
       changes: Partial<Pick<Shift, "startMinutes" | "endMinutes" | "pauseMinutes">>,
     ) => {
-      setSchedule((s) => ({
-        ...s,
-        shifts: s.shifts.map((sh) => (sh.id === shiftId ? updateShiftTimes(sh, changes) : sh)),
-      }));
+      setSchedule((s) => {
+        if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+        return {
+          ...s,
+          shifts: s.shifts.map((sh) => (sh.id === shiftId ? updateShiftTimes(sh, changes) : sh)),
+        };
+      });
     },
     [],
   );
@@ -271,6 +322,7 @@ export function useSchedule() {
   const addShift = useCallback(
     (employeeId: string, date: string, start: number, end: number, pause: number) => {
       setSchedule((s) => {
+        if (s.lockedAt) return s; // Monat gedruckt und gesperrt
         const exists = s.shifts.some((sh) => sh.employeeId === employeeId && sh.date === date);
         if (exists) return s;
         return { ...s, shifts: [...s.shifts, createManualShift(employeeId, date, start, end, pause)] };
@@ -280,20 +332,27 @@ export function useSchedule() {
   );
 
   const deleteShift = useCallback((shiftId: string) => {
-    setSchedule((s) => ({ ...s, shifts: s.shifts.filter((sh) => sh.id !== shiftId) }));
+    setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+      return { ...s, shifts: s.shifts.filter((sh) => sh.id !== shiftId) };
+    });
   }, []);
 
   /** Markiert einen Tag als "Frei": entfernt eine bestehende Schicht. */
   const setFrei = useCallback((employeeId: string, date: string) => {
-    setSchedule((s) => ({
-      ...s,
-      shifts: s.shifts.filter((sh) => !(sh.employeeId === employeeId && sh.date === date)),
-    }));
+    setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
+      return {
+        ...s,
+        shifts: s.shifts.filter((sh) => !(sh.employeeId === employeeId && sh.date === date)),
+      };
+    });
   }, []);
 
   /** Verschiebt eine Schicht zu einem anderen Mitarbeiter (gleicher Tag). */
   const moveShiftToEmployee = useCallback((shiftId: string, targetEmployeeId: string) => {
     setSchedule((s) => {
+      if (s.lockedAt) return s; // Monat gedruckt und gesperrt
       const shift = s.shifts.find((sh) => sh.id === shiftId);
       if (!shift) return s;
       const conflict = s.shifts.some(
@@ -314,6 +373,9 @@ export function useSchedule() {
     originalShifts,
     validation,
     peakGaps,
+    isLocked,
+    markWeekPrinted,
+    unlockMonth,
     genError,
     hasOriginal: originalShifts.length > 0,
     updateMeta,

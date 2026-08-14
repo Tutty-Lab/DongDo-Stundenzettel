@@ -32,11 +32,22 @@ describe("chooseShiftHours – Schicht passt sich dem Tag an", () => {
   });
 
   it("hält den Rest exakt aufteilbar", () => {
-    // Rest von 11 h: 8 ginge nicht, weil 3 h für Vollzeit keine gültige Länge
-    // ist (3 h bleibt der Teilzeit vorbehalten). 7 + 4 geht auf.
-    expect(chooseShiftHours(11 * 60, 8, "VOLLZEIT")).toBe(7);
+    // Rest von 11 h geht mit Vollzeit-Längen (6/7/8/9) nicht auf: 11-8=3,
+    // 11-7=4, 11-6=5 sind alle keine gültigen Vollzeit-Längen. Deshalb greift
+    // die volle Bandbreite, dort ist 8 möglich (Rest 3 h).
+    expect(chooseShiftHours(11 * 60, 8, "VOLLZEIT")).toBe(8);
     // Rest von 8 h: 8 ist ok (Rest 0).
     expect(chooseShiftHours(8 * 60, 8, "VOLLZEIT")).toBe(8);
+  });
+
+  it("hält den Rest auch in LANGEN Längen aufteilbar, wenn die Stoßzeit sie braucht", () => {
+    // peakHours = 8 verlangt eine Schicht >= 8 h UND einen Rest, der sich
+    // ebenfalls aus 8/9-h-Schichten zusammensetzen lässt.
+    // 120 h = 15 x 8 h  => 8 ist zulässig.
+    expect(chooseShiftHours(120 * 60, 9, "TEILZEIT", 8, undefined, 8)).toBeGreaterThanOrEqual(8);
+    // 13 h lässt sich nicht in 8/9-h-Schichten zerlegen; dann greift die
+    // normale Auswahl, damit das Soll überhaupt aufgeht.
+    expect(chooseShiftHours(13 * 60, 9, "VOLLZEIT", 8, undefined, 8)).toBeLessThan(8);
   });
 
   it("gibt 0 zurück, wenn keine gültige Länge möglich ist", () => {

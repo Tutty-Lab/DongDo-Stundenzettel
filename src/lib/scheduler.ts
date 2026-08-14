@@ -73,8 +73,6 @@ type SchedulerState = {
   rng: () => number;
   /** true = Schichtlängen mischen; false = immer die längste (Rückfallmodus). */
   varyLengths: boolean;
-  /** employeeId -> verbleibende bewusste Kurzschichten in diesem Monat. */
-  shortBudget: Map<string, number>;
 };
 
 /** Länge des Zeitfensters in Minuten (0 wenn geschlossen). */
@@ -104,34 +102,18 @@ const MIN_SHIFT_MINUTES = 3 * 60;
 /**
  * Erlaubte Schichtlängen je Anstellungsart (Vorgabe des Chefs).
  *
- * Vollzeit stand früher auf 6..9 h. Dadurch konnte eine Vollzeitkraft NIE
- * einen kurzen Dienst bekommen, auch wenn im Monat reichlich Tage übrig
- * waren – der Plan wirkte dadurch mechanisch (fast nur 8/9-h-Schichten).
- * Jetzt sind 4 und 5 h zugelassen; wie oft sie wirklich vorkommen, steuert
- * das Kurzschicht-Budget (siehe SHORT_SHIFT_BUDGET), nicht diese Liste.
- * Die ganz kurze 3-h-Schicht bleibt der Teilzeit vorbehalten.
+ * Vollzeit macht lange Dienste (6..9 h), Teilzeit die volle Bandbreite.
+ *
+ * Es gab zwischenzeitlich ein Kurzschicht-Budget, das einen langen Dienst
+ * gelegentlich durch zwei kurze ersetzt hat (8 h -> 4 h + 4 h), damit die
+ * Pläne abwechslungsreicher aussehen. Das ist wieder draußen: der Laden hat
+ * drei Beschäftigte, da soll der Plan bewusst gleichförmig bleiben. Jede
+ * Abwechslung kostet hier Besetzung in der Stoßzeit.
  */
 const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
-  VOLLZEIT: [4, 5, 6, 7, 8, 9],
+  VOLLZEIT: [6, 7, 8, 9],
   TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
 };
-
-/**
- * Wie viele bewusst KURZE Dienste darf ein Mitarbeiter pro Monat bekommen?
- *
- * Ohne diese Reserve wählt der Scheduler immer die längste Schicht, die das
- * Tempo hält – das Monats-Soll geht auf, aber jeder Monat sieht gleich aus.
- * Mit dem Budget wird ein langer Dienst gelegentlich durch zwei kurze ersetzt
- * (z.B. 8 h -> 4 h + 4 h). Das Budget greift nur, wenn genügend Tage übrig
- * sind; das Monats-Soll bleibt in jedem Fall exakt.
- */
-const SHORT_SHIFT_BUDGET = 3;
-
-/** Ab wie vielen freien Reservetagen darf eine Kurzschicht gezogen werden? */
-const SHORT_SHIFT_MIN_SLACK = 2;
-
-/** Wahrscheinlichkeit, das Budget bei einer Platzierung einzusetzen. */
-const SHORT_SHIFT_CHANCE = 0.35;
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
 const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8, 9];
@@ -148,8 +130,10 @@ export type PeakWindow = {
 };
 
 export const PEAK_WINDOWS: readonly PeakWindow[] = [
-  { label: "Mittag", startMinutes: 12 * 60, endMinutes: 13 * 60, minStaff: 2 },
-  { label: "Abend", startMinutes: 17 * 60, endMinutes: 19 * 60, minStaff: 2 },
+  // Eine durchgehende Stoßzeit statt zweier getrennter Spitzen: von 12 bis 18
+  // Uhr sollen immer zwei Leute da sein. Öffnen (10:00) und Schließen (20:00)
+  // deckt bewusst nur EINE Person ab – der Laden hat drei Beschäftigte.
+  { label: "Stoßzeit", startMinutes: 12 * 60, endMinutes: 18 * 60, minStaff: 2 },
 ];
 
 /** Wie viele Leute sind zum Zeitpunkt `t` anwesend (Anwesenheit inkl. Pause)? */
@@ -201,7 +185,9 @@ function canDecompose(hours: number, allowed: readonly number[]): boolean {
   if (hours === 0) return true;
   if (hours < Math.min(...allowed)) return false;
 
-  const key = `${allowed.length}:${hours}`;
+  // Schlüssel über die WERTE, nicht die Länge: zwei verschiedene Längenmengen
+  // mit gleich vielen Einträgen hätten sonst denselben Cache-Eintrag.
+  const key = `${allowed.join(",")}:${hours}`;
   const cached = decomposeCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -231,6 +217,66 @@ export function maxShiftHoursForWindow(windowMinutes: number): number {
 }
 
 /**
+ * Kürzeste Schichtlänge (Stunden), deren Anwesenheit mindestens `presence`
+ * Minuten abdeckt. 0 = selbst die längste Schicht reicht nicht.
+ */
+export function shiftHoursForPresence(presenceMinutes: number): number {
+  for (let i = SHIFT_HOURS_DESC.length - 1; i >= 0; i--) {
+    const hours = SHIFT_HOURS_DESC[i];
+    if (presenceFromPaid(hours * 60) >= presenceMinutes) return hours;
+  }
+  return 0;
+}
+
+/**
+ * Wie viele bezahlte Minuten braucht ein Tag mindestens, damit die Stoßzeit
+ * überhaupt besetzt werden KANN?
+ *
+ * Hintergrund: Früh hängt am Öffnen, Spät am Schließen. Eine Frühschicht deckt
+ * die Stoßzeit nur, wenn sie bis zu deren Ende reicht; eine Spätschicht nur,
+ * wenn sie vor deren Beginn anfängt. Bei 10:00–20:00 und einer Stoßzeit von
+ * 12 bis 18 Uhr heißt das: beide brauchen 8 h Anwesenheitsspanne, also je eine
+ * 8-h-Schicht. Zwei Personen => 16 h an dem Tag.
+ *
+ * Ohne diesen Boden verteilt die Gewichtung ruhigen Tagen so wenig Stunden,
+ * dass dort nur kurze Dienste möglich sind – und die decken die Stoßzeit nie,
+ * egal wie man sie schiebt.
+ */
+function peakFloorMinutes(day: ResolvedDay): number {
+  const hours = peakCapableHours(day);
+  return hours === 0 ? 0 : peakMinStaff() * hours * 60;
+}
+
+/**
+ * Wie lang muss EIN Dienst sein, damit er eine Stoßzeit vollständig abdecken
+ * kann? Maßgeblich ist der ungünstigere der beiden Anker (Öffnen bzw.
+ * Schließen). 0 = an diesem Tag gibt es keine Stoßzeit zu decken.
+ *
+ * Das ist eine Aussage über die LÄNGE, nicht über die Lage: wo der Dienst am
+ * Ende liegt, entscheidet layoutDayForPeaks. Ein Tag mit genug Stunden, aber
+ * lauter zu kurzen Diensten (z.B. 16 h als 7 h + 9 h) bekommt die Stoßzeit
+ * trotzdem nicht besetzt – die 7-h-Frühschicht endet um 17:30.
+ */
+function peakCapableHours(day: ResolvedDay): number {
+  if (day.closed) return 0;
+  let hours = 0;
+  for (const peak of PEAK_WINDOWS) {
+    const from = Math.max(peak.startMinutes, day.window.startMinutes);
+    const to = Math.min(peak.endMinutes, day.window.endMinutes);
+    if (to <= from) continue;
+    const neededPresence = Math.max(to - day.window.startMinutes, day.window.endMinutes - from);
+    const h = shiftHoursForPresence(Math.min(neededPresence, windowLength(day)));
+    if (h > hours) hours = h;
+  }
+  return hours;
+}
+
+/** Höchste geforderte Mindestbesetzung über alle Stoßzeiten. */
+function peakMinStaff(): number {
+  return PEAK_WINDOWS.reduce((max, p) => Math.max(max, p.minStaff), 0);
+}
+
+/**
  * Wählt die Länge (Stunden) der nächsten Schicht eines Mitarbeiters so, dass
  * - sie 3..9 h ist und ins Tagesfenster passt (<= maxHours),
  * - der verbleibende Rest exakt aufteilbar bleibt (0 oder >= 3 h),
@@ -248,8 +294,11 @@ export function chooseShiftHours(
   needHours = MAX_SHIFT_HOURS,
   /** Ohne Zufallsquelle wird deterministisch die kürzeste taugliche gewählt. */
   rng?: () => number,
-  /** true = für diese Platzierung bewusst eine kurze Schicht ziehen. */
-  preferShort = false,
+  /**
+   * Länge (Stunden), ab der ein Dienst die Stoßzeit decken kann. > 0 heißt:
+   * dieser Tag braucht noch so einen Dienst.
+   */
+  peakHours = 0,
 ): number {
   const remainingHours = remainingMinutes / 60;
   const cap = Math.min(MAX_SHIFT_HOURS, maxHours, remainingHours);
@@ -268,13 +317,6 @@ export function chooseShiftHours(
     return out;
   };
 
-  // Erst die für die Anstellungsart vorgesehenen Längen. Geht dort nichts –
-  // etwa an einem halben Tag, an dem keine 6-h-Schicht mehr hineinpasst –
-  // greift die volle Bandbreite, damit auch Vollzeit an dem Tag arbeiten kann.
-  let valid = pick(ALLOWED_HOURS[employmentType]);
-  if (valid.length === 0) valid = pick(ALL_HOURS);
-  if (valid.length === 0) return 0;
-
   // Früher entschied eine feste Rangliste (Vollzeit 8, Teilzeit 5). Ergebnis:
   // jede Vollzeitschicht war 8 h, jede Teilzeitschicht 5 h – keinerlei
   // Abwechslung, und Teilzeit war faktisch auf 5 h/Tag gedeckelt.
@@ -282,25 +324,37 @@ export function chooseShiftHours(
   // Jetzt: unter allen Längen zufällig wählen, aber nur solche, die das Tempo
   // halten. Wer noch viel Soll und wenig Tage hat, bekommt zwangsläufig lange
   // Schichten; wer gut liegt, bekommt Abwechslung.
-  const onPace = valid.filter((h) => h >= needHours);
+  const choose = (valid: number[]): number => {
+    const onPace = valid.filter((h) => h >= needHours);
+    const pool = onPace.length > 0 ? onPace : [valid[valid.length - 1]];
+    if (!rng) return pool[pool.length - 1];
+    // „Bester von zwei Würfen": erzeugt Abwechslung, gewichtet aber zugunsten
+    // längerer Schichten. Rein gleichverteilt würden zu viele kurze Schichten
+    // fallen und die verfügbaren Tage wären vor Monatsende aufgebraucht.
+    const a = pool[Math.floor(rng() * pool.length)];
+    const b = pool[Math.floor(rng() * pool.length)];
+    return Math.max(a, b);
+  };
 
-  // Bewusste Kurzschicht: alles UNTER dem nötigen Tempo. Erlaubt ist das nur,
-  // wenn der Aufrufer genug Reservetage gezählt hat – sonst reißt das Soll.
-  if (rng && preferShort) {
-    const short = valid.filter((h) => h < needHours);
-    if (short.length > 0) return short[Math.floor(rng() * short.length)];
+  // Braucht der Tag noch einen stoßzeittauglichen Dienst, wird zuerst NUR mit
+  // den langen Längen gerechnet – und zwar auch für den Rest. Ohne diese
+  // zweite Bedingung bleibt am Monatsende ein Rest übrig, der sich nicht mehr
+  // in lange Dienste zerlegen lässt (z.B. 13 h), und genau dort entstehen die
+  // kurzen Schichten, die eine Stoßzeit nie decken können.
+  if (peakHours > 0) {
+    const longOnly = ALLOWED_HOURS[employmentType].filter((h) => h >= peakHours);
+    const validLong = pick(longOnly);
+    if (validLong.length > 0) return choose(validLong);
   }
 
-  const pool = onPace.length > 0 ? onPace : [valid[valid.length - 1]];
+  // Erst die für die Anstellungsart vorgesehenen Längen. Geht dort nichts –
+  // etwa an einem halben Tag, an dem keine 6-h-Schicht mehr hineinpasst –
+  // greift die volle Bandbreite, damit auch Vollzeit an dem Tag arbeiten kann.
+  let valid = pick(ALLOWED_HOURS[employmentType]);
+  if (valid.length === 0) valid = pick(ALL_HOURS);
+  if (valid.length === 0) return 0;
 
-  if (!rng) return pool[pool.length - 1];
-
-  // „Bester von zwei Würfen": erzeugt Abwechslung, gewichtet aber zugunsten
-  // längerer Schichten. Rein gleichverteilt würden zu viele kurze Schichten
-  // fallen und die verfügbaren Tage wären vor Monatsende aufgebraucht.
-  const a = pool[Math.floor(rng() * pool.length)];
-  const b = pool[Math.floor(rng() * pool.length)];
-  return Math.max(a, b);
+  return choose(valid);
 }
 
 /** Stabile Basisordnung: Vollzeit zuerst, dann nach Id. */
@@ -398,20 +452,6 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
   const usableDays = Math.max(1, Math.floor(daysLeft * 0.9));
   const needHours = daysLeft > 0 ? Math.ceil(remaining / 60 / usableDays) : MAX_SHIFT_HOURS;
 
-  // Reservetage = wie viele Tage über das absolute Minimum hinaus übrig sind,
-  // wenn ab jetzt nur noch die längste Schicht käme. Nur aus dieser Reserve
-  // darf eine Kurzschicht bezahlt werden – sonst geht das Soll nicht mehr auf.
-  const minDaysNeeded = Math.ceil(remaining / 60 / MAX_SHIFT_HOURS);
-  const slackDays = daysLeft - minDaysNeeded;
-  const budget = state.shortBudget.get(employee.id) ?? 0;
-  // Die Entscheidung fällt EINMAL je Platzierung, nicht je Kandidatentag –
-  // sonst hinge sie davon ab, wie viele Tage gerade geprüft werden.
-  const preferShort =
-    state.varyLengths &&
-    budget > 0 &&
-    slackDays >= SHORT_SHIFT_MIN_SLACK &&
-    state.rng() < SHORT_SHIFT_CHANCE;
-
   let bestDate: string | null = null;
   let bestHours = 0;
   let bestScore = Number.NEGATIVE_INFINITY;
@@ -423,13 +463,28 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
 
     // Längste Schicht, die ins Fenster passt UND den Rest exakt aufteilbar lässt.
     const maxHours = maxShiftHoursForWindow(windowLength(day));
+
+    // Solange der Tag noch nicht genug LANGE Dienste hat, um die Stoßzeit zu
+    // decken, wird die Mindestlänge hochgezogen. Ohne das entstehen Tage mit
+    // rechnerisch genug Stunden, aber falscher Aufteilung (16 h als 7 + 9),
+    // und die Stoßzeit bleibt unbesetzt – verschieben hilft dann nicht mehr.
+    const peakHours = peakCapableHours(day);
+    let stillNeedsLong = 0;
+    if (peakHours > 0) {
+      let longEnough = 0;
+      for (const s of state.shifts) {
+        if (s.date === isoDate && s.paidMinutes >= peakHours * 60) longEnough++;
+      }
+      if (longEnough < peakMinStaff()) stillNeedsLong = peakHours;
+    }
+
     const hours = chooseShiftHours(
       remaining,
       maxHours,
       employee.employmentType,
-      needHours,
+      stillNeedsLong > 0 ? Math.max(needHours, stillNeedsLong) : needHours,
       state.varyLengths ? state.rng : undefined,
-      preferShort,
+      stillNeedsLong,
     );
     if (hours === 0) continue; // hier passt keine gültige Schicht
 
@@ -465,15 +520,43 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
 
   if (bestDate === null || bestHours === 0) return false;
 
-  // Budget nur abbuchen, wenn wirklich unter Tempo geplant wurde.
-  if (preferShort && bestHours < needHours) {
-    state.shortBudget.set(employee.id, budget - 1);
-  }
-
   const shift = makeShift(state, employee, bestDate, bestHours * 60);
   applyShift(state, shift);
   state.remaining.set(employee.id, remaining - shift.paidMinutes);
   return true;
+}
+
+/**
+ * Wie viele Dienste an diesem Tag sind lang genug, um die Stoßzeit zu decken?
+ * Unendlich, wenn der Tag gar keine Stoßzeit hat – dann ist die Zahl egal.
+ */
+function peakCapableCount(state: SchedulerState, isoDate: string): number {
+  const need = peakCapableHours(state.dayOf(isoDate));
+  if (need === 0) return Number.POSITIVE_INFINITY;
+  let n = 0;
+  for (const s of state.shifts) {
+    if (s.date === isoDate && s.paidMinutes >= need * 60) n++;
+  }
+  return n;
+}
+
+/** Ist dieser Dienst lang genug für die Stoßzeit an diesem Tag? */
+function isPeakCapable(state: SchedulerState, isoDate: string, paidMinutes: number): boolean {
+  const need = peakCapableHours(state.dayOf(isoDate));
+  return need > 0 && paidMinutes >= need * 60;
+}
+
+/**
+ * Darf sich die Zahl der stoßzeittauglichen Dienste so ändern?
+ *
+ * Erlaubt ist alles, was die geforderte Besetzung weiter trägt – und bei
+ * Tagen, die sie ohnehin nicht erreichen, alles, was nichts verschlimmert.
+ * Ohne diese Schranke räumt der Reparaturlauf die Stoßzeit wieder ab: er
+ * optimiert nur die Tagesstunden und schiebt fröhlich eine 7-h-Schicht auf
+ * einen Tag, der zwei 8-h-Schichten braucht.
+ */
+function peakCapacityOk(oldCount: number, newCount: number): boolean {
+  return newCount >= Math.min(peakMinStaff(), oldCount);
 }
 
 /** Kosten eines Tages = |zugewiesene - rohe Soll-Minuten|. */
@@ -534,6 +617,14 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
         trial.delete(from);
         if (consecutiveRunLengthWith(trial, to) > 6) continue;
 
+        // Die Stoßzeit darf durch einen Umzug nicht schlechter besetzbar werden.
+        const capFrom = peakCapableCount(state, from);
+        const capTo = peakCapableCount(state, to);
+        const leavesFrom = isPeakCapable(state, from, shift.paidMinutes) ? 1 : 0;
+        const arrivesTo = isPeakCapable(state, to, shift.paidMinutes) ? 1 : 0;
+        if (!peakCapacityOk(capFrom, capFrom - leavesFrom)) continue;
+        if (!peakCapacityOk(capTo, capTo + arrivesTo)) continue;
+
         const oldCostTo = dateCost(state, to);
         const newCostFrom = Math.abs(
           state.dateState.get(from)!.totalPaid - shift.paidMinutes - state.rawTarget.get(from)!,
@@ -570,6 +661,108 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
  * Wie der Umzug ändert der Tausch keine Dauer und verletzt keine harte Regel
  * => jedes Monats-Soll bleibt exakt erhalten.
  */
+/** Dürfen diese zwei Dienste die Tage tauschen, ohne eine harte Regel zu brechen? */
+function canSwap(state: SchedulerState, a: Shift, b: Shift): boolean {
+  if (a.date === b.date) return false;
+  if (a.employeeId === b.employeeId) return false; // das wäre ein Umzug
+
+  const workedA = state.worked.get(a.employeeId)!;
+  const workedB = state.worked.get(b.employeeId)!;
+  // Höchstens ein Dienst pro Mitarbeiter und Tag.
+  if (workedA.has(b.date) || workedB.has(a.date)) return false;
+
+  // Die getauschten Längen müssen in das jeweilige Fenster passen.
+  if (windowLength(state.dayOf(a.date)) < presenceFromPaid(b.paidMinutes)) return false;
+  if (windowLength(state.dayOf(b.date)) < presenceFromPaid(a.paidMinutes)) return false;
+
+  // 6-Tage-Regel für beide, jeweils ohne den eigenen alten Tag.
+  const trialA = new Set(workedA);
+  trialA.delete(a.date);
+  if (consecutiveRunLengthWith(trialA, b.date) > 6) return false;
+  const trialB = new Set(workedB);
+  trialB.delete(b.date);
+  if (consecutiveRunLengthWith(trialB, a.date) > 6) return false;
+
+  return true;
+}
+
+/** Führt den Tausch aus: a wandert auf b.date, b auf a.date. Dauer bleibt. */
+function performSwap(
+  state: SchedulerState,
+  a: Shift,
+  b: Shift,
+  employeesById: Map<string, Employee>,
+): void {
+  const empA = employeesById.get(a.employeeId)!;
+  const empB = employeesById.get(b.employeeId)!;
+  const dateA = a.date;
+  const dateB = b.date;
+  const paidA = a.paidMinutes;
+  const paidB = b.paidMinutes;
+  removeShift(state, a);
+  removeShift(state, b);
+  applyShift(state, makeShift(state, empA, dateB, paidA));
+  applyShift(state, makeShift(state, empB, dateA, paidB));
+}
+
+/**
+ * Zweiter Reparaturlauf, diesmal ausschließlich für die Stoßzeit.
+ *
+ * repairDemand optimiert nur die Tagesstunden. Ein Tag kann damit rechnerisch
+ * genau richtig liegen und die Stoßzeit trotzdem nicht besetzen – etwa 16 h
+ * als 7 h + 9 h statt 8 h + 8 h. Von selbst repariert sich das nie, weil jeder
+ * Tausch, der die Form verbessert, die Stundenbilanz leicht verschlechtert und
+ * deshalb dort abgelehnt wird.
+ *
+ * Hier gilt die umgekehrte Priorität: ein Tag ohne genug lange Dienste tauscht
+ * einen kurzen gegen einen langen von einem Tag, der ihn entbehren kann. Die
+ * Stundenverschiebung wird bewusst in Kauf genommen – die Stoßzeiten-Regel ist
+ * eine Vorgabe des Betriebs, die Tagesgewichtung nur ein Richtwert.
+ */
+function repairPeakCapacity(state: SchedulerState, employeesById: Map<string, Employee>): void {
+  const MAX_PASSES = 4;
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    let improved = false;
+
+    for (const isoDate of state.dates) {
+      const need = peakCapableHours(state.dayOf(isoDate));
+      if (need === 0) continue;
+      if (peakCapableCount(state, isoDate) >= peakMinStaff()) continue;
+
+      // Kürzeste zuerst hergeben: die reißt die geringste Lücke.
+      const tooShort = state.shifts
+        .filter((s) => s.date === isoDate && s.paidMinutes < need * 60)
+        .sort((x, y) => x.paidMinutes - y.paidMinutes);
+
+      let swapped = false;
+      for (const short of tooShort) {
+        for (const long of [...state.shifts]) {
+          if (long.date === isoDate) continue;
+          if (long.paidMinutes < need * 60) continue; // taugt hier nicht
+
+          // Der abgebende Tag darf dadurch nicht selbst unterversorgt werden.
+          const capDonor = peakCapableCount(state, long.date);
+          const donorNeed = peakCapableHours(state.dayOf(long.date));
+          const longCountsThere = donorNeed > 0 && long.paidMinutes >= donorNeed * 60;
+          const shortCountsThere = donorNeed > 0 && short.paidMinutes >= donorNeed * 60;
+          const newCapDonor = capDonor - (longCountsThere ? 1 : 0) + (shortCountsThere ? 1 : 0);
+          if (!peakCapacityOk(capDonor, newCapDonor)) continue;
+
+          if (!canSwap(state, short, long)) continue;
+
+          performSwap(state, short, long, employeesById);
+          improved = true;
+          swapped = true;
+          break;
+        }
+        if (swapped) break;
+      }
+    }
+
+    if (!improved) break;
+  }
+}
+
 function trySwaps(state: SchedulerState, employeesById: Map<string, Employee>): boolean {
   let improved = false;
   const snapshot = [...state.shifts];
@@ -604,6 +797,21 @@ function trySwaps(state: SchedulerState, employeesById: Map<string, Employee>): 
       const trialB = new Set(workedB);
       trialB.delete(b.date);
       if (consecutiveRunLengthWith(trialB, a.date) > 6) continue;
+
+      // Auch der Tausch darf die Stoßzeit nicht abräumen: a landet auf b.date
+      // und umgekehrt, die Längen wandern also mit.
+      const capA = peakCapableCount(state, a.date);
+      const capB = peakCapableCount(state, b.date);
+      const newCapA =
+        capA -
+        (isPeakCapable(state, a.date, a.paidMinutes) ? 1 : 0) +
+        (isPeakCapable(state, a.date, b.paidMinutes) ? 1 : 0);
+      const newCapB =
+        capB -
+        (isPeakCapable(state, b.date, b.paidMinutes) ? 1 : 0) +
+        (isPeakCapable(state, b.date, a.paidMinutes) ? 1 : 0);
+      if (!peakCapacityOk(capA, newCapA)) continue;
+      if (!peakCapacityOk(capB, newCapB)) continue;
 
       const dsA = state.dateState.get(a.date)!;
       const dsB = state.dateState.get(b.date)!;
@@ -960,9 +1168,28 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   const totalTargetMin = employees.reduce((sum, e) => sum + e.targetMinutes, 0);
   const totalWeight = dates.reduce((sum, d) => sum + weightOf(d), 0);
 
-  const rawTarget = new Map<string, number>();
+  // Erst der Boden für die Stoßzeit, dann die Gewichtung auf den Rest.
+  // Reicht die Gesamtsumme nicht einmal für den Boden, wird rein nach Gewicht
+  // verteilt – dann ist der Monat für die Stoßzeiten-Regel schlicht zu dünn
+  // besetzt, und das Dashboard weist die Lücken aus.
+  const floors = new Map<string, number>();
+  let totalFloor = 0;
   for (const d of dates) {
-    rawTarget.set(d, totalWeight > 0 ? (totalTargetMin * weightOf(d)) / totalWeight : 0);
+    const f = peakFloorMinutes(dayOf(d));
+    floors.set(d, f);
+    totalFloor += f;
+  }
+
+  const rawTarget = new Map<string, number>();
+  const spare = totalTargetMin - totalFloor;
+  for (const d of dates) {
+    if (totalWeight <= 0) {
+      rawTarget.set(d, 0);
+    } else if (spare >= 0) {
+      rawTarget.set(d, floors.get(d)! + (spare * weightOf(d)) / totalWeight);
+    } else {
+      rawTarget.set(d, (totalTargetMin * weightOf(d)) / totalWeight);
+    }
   }
 
   const dateState = new Map<string, DateState>();
@@ -1003,7 +1230,6 @@ export function generateSchedule(input: GenerateInput): Shift[] {
       dayOf,
       rng: seededRandom(seed + salt),
       varyLengths,
-      shortBudget: new Map(employees.map((e) => [e.id, SHORT_SHIFT_BUDGET])),
     };
 
     // Rundenweise, rotierend platzieren: pro Runde eine Schicht je Mitarbeiter,
@@ -1039,6 +1265,8 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   }
 
   repairDemand(state, employeesById);
+  // Erst danach: die Stundenbilanz steht, jetzt die Form für die Stoßzeit.
+  repairPeakCapacity(state, employeesById);
   balanceShiftTypes(state);
 
   // Stabil sortieren: nach Datum, dann Startzeit, dann Mitarbeiter.
