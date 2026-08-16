@@ -14,6 +14,7 @@ import { isDayClosed } from "../lib/workHours";
 import { publicHolidays } from "../lib/holidays";
 import { ShiftCellEditor } from "./ShiftCellEditor";
 import { ScheduleDayView } from "./ScheduleDayView";
+import { weeksOfMonth } from "../lib/weeks";
 
 function isWeekendKey(iso: string): boolean {
   const k = weekdayKeyOf(parseIsoDate(iso));
@@ -32,14 +33,30 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
   const { schedule, validation, generate, genError, isLocked } = store;
   const [selected, setSelected] = useState<{ employeeId: string; date: string } | null>(null);
   // Mặc định: điện thoại -> xem theo ngày, màn lớn -> bảng tháng.
-  const [view, setView] = useState<"grid" | "day">(() =>
+  const [view, setView] = useState<"grid" | "day" | "week">(() =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches ? "day" : "grid",
   );
+  const [weekIndex, setWeekIndex] = useState(0);
 
   const dates = useMemo(
     () => datesOfMonth(schedule.year, schedule.month),
     [schedule.year, schedule.month],
   );
+
+  const weeks = useMemo(
+    () => weeksOfMonth(schedule.year, schedule.month),
+    [schedule.year, schedule.month],
+  );
+
+  /**
+   * Tage, die im Raster gezeigt werden. In der Wochenansicht nur die der
+   * gewählten Woche – gerechnet wird trotzdem immer mit dem ganzen Monat,
+   * die Summen rechts bleiben also Monatssummen.
+   */
+  const gridDates = useMemo(() => {
+    if (view !== "week") return dates;
+    return weeks[Math.min(weekIndex, weeks.length - 1)]?.dates ?? dates;
+  }, [view, weekIndex, weeks, dates]);
 
   // Tra nhanh: employeeId#date -> Shift
   const shiftMap = useMemo(() => {
@@ -129,6 +146,14 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
             Theo ngày
           </button>
           <button
+            onClick={() => setView("week")}
+            className={`px-3 py-1.5 text-sm rounded-md ${
+              view === "week" ? "bg-slate-900 text-white" : "text-slate-600"
+            }`}
+          >
+            Theo tuần
+          </button>
+          <button
             onClick={() => setView("grid")}
             className={`px-3 py-1.5 text-sm rounded-md ${
               view === "grid" ? "bg-slate-900 text-white" : "text-slate-600"
@@ -136,6 +161,31 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
           >
             Bảng tháng
           </button>
+        </div>
+      )}
+
+      {/* Wochenwahl – nur in der Wochenansicht */}
+      {hasEmployees && view === "week" && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {weeks.map((w, idx) => {
+            const printed = (schedule.printedWeeks ?? []).includes(w.weekStart);
+            return (
+              <button
+                key={w.weekStart}
+                onClick={() => setWeekIndex(idx)}
+                className={`rounded border px-3 py-1.5 text-sm ${
+                  idx === weekIndex
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+                title={printed ? "Tuần này đã in" : undefined}
+              >
+                {w.label}
+                {printed && " ✓"}
+              </button>
+            );
+          })}
+          <span className="text-xs text-slate-500">In tuần ở tab „Bảng chấm công".</span>
         </div>
       )}
 
@@ -157,8 +207,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
         </div>
       )}
 
-      {/* Chú thích (chỉ ở bảng tháng) */}
-      {view === "grid" && (
+      {/* Chú thích (bảng tháng và bảng tuần dùng chung lưới) */}
+      {view !== "day" && (
         <div className="flex flex-wrap gap-3 mb-2 text-xs text-slate-600">
           <span className="inline-flex items-center gap-1">
             <span className="inline-block h-3 w-3 rounded border shift-early" /> Ca sáng
@@ -191,7 +241,7 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                 </th>
                 <th className="bg-slate-100 border-b border-slate-200 px-2 py-2 text-left">Loại</th>
                 <th className="bg-slate-100 border-b border-slate-200 px-2 py-2 text-right">Định mức</th>
-                {dates.map((d) => {
+                {gridDates.map((d) => {
                   const day = parseIsoDate(d).getDate();
                   const wk = WEEKDAY_SHORT_VI[weekdayKeyOf(parseIsoDate(d))];
                   const ov = overridesByDate.get(d);
@@ -245,7 +295,7 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                     <td className="border-b border-slate-100 px-2 py-1 text-right text-slate-500">
                       {emp.targetMinutes / 60}h
                     </td>
-                    {dates.map((d) => {
+                    {gridDates.map((d) => {
                       const shift = shiftMap.get(`${emp.id}#${d}`);
                       return (
                         <td
@@ -289,14 +339,14 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
               })}
             </tbody>
             <tfoot>
-              <SummaryRow label="Số nhân viên" dates={dates} value={(d) => String(dayStats.get(d)!.count)} />
+              <SummaryRow label="Số nhân viên" dates={gridDates} value={(d) => String(dayStats.get(d)!.count)} />
               <SummaryRow
                 label="Tổng giờ"
-                dates={dates}
+                dates={gridDates}
                 value={(d) => minutesToShortHours(dayStats.get(d)!.total)}
               />
-              <SummaryRow label="Ca sáng" dates={dates} value={(d) => String(dayStats.get(d)!.early)} />
-              <SummaryRow label="Ca tối" dates={dates} value={(d) => String(dayStats.get(d)!.late)} />
+              <SummaryRow label="Ca sáng" dates={gridDates} value={(d) => String(dayStats.get(d)!.early)} />
+              <SummaryRow label="Ca tối" dates={gridDates} value={(d) => String(dayStats.get(d)!.late)} />
             </tfoot>
           </table>
         </div>
