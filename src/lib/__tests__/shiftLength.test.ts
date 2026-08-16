@@ -44,11 +44,12 @@ describe("chooseShiftHours – Schicht passt sich dem Tag an", () => {
     // ebenfalls aus 8/9-h-Schichten zusammensetzen lässt.
     // 120 h = 15 x 8 h  => 8 ist zulässig.
     expect(chooseShiftHours(120 * 60, 9, "TEILZEIT", 8, undefined, 8)).toBeGreaterThanOrEqual(8);
-    // 13 h lässt sich NICHT in 8/9-h-Schichten zerlegen. Dann greift die
-    // normale Auswahl – der Rest muss aber weiterhin aufgehen: 9 + 4.
+    // 13 h lässt sich NICHT in reine 8/9-h-Schichten zerlegen. Gewählt wird
+    // dann die kürzeste Länge, die das Tempo hält (8) – und der Rest muss
+    // weiterhin eine gültige Vollzeit-Länge sein.
     const h = chooseShiftHours(13 * 60, 9, "VOLLZEIT", 8, undefined, 8);
-    expect(h).toBe(9);
-    expect(13 - h).toBe(4); // gültige Vollzeit-Länge, das Soll geht auf
+    expect(h).toBeGreaterThanOrEqual(8);
+    expect([4, 5]).toContain(13 - h); // Rest bleibt planbar
   });
 
   it("gibt 0 zurück, wenn keine gültige Länge möglich ist", () => {

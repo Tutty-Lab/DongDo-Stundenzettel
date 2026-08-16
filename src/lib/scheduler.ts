@@ -442,15 +442,19 @@ export function chooseShiftHours(
   // halten. Wer noch viel Soll und wenig Tage hat, bekommt zwangsläufig lange
   // Schichten; wer gut liegt, bekommt Abwechslung.
   const choose = (valid: number[]): number => {
-    const onPace = valid.filter((h) => h >= needHours);
-    const pool = onPace.length > 0 ? onPace : [valid[valid.length - 1]];
-    if (!rng) return pool[pool.length - 1];
-    // „Bester von zwei Würfen": erzeugt Abwechslung, gewichtet aber zugunsten
-    // längerer Schichten. Rein gleichverteilt würden zu viele kurze Schichten
-    // fallen und die verfügbaren Tage wären vor Monatsende aufgebraucht.
-    const a = pool[Math.floor(rng() * pool.length)];
-    const b = pool[Math.floor(rng() * pool.length)];
-    return Math.max(a, b);
+    const onPace = valid.filter((h) => h >= needHours).sort((a, b) => a - b);
+    if (onPace.length === 0) return valid[valid.length - 1];
+
+    // Die KÜRZESTE Länge, die das Tempo noch hält.
+    //
+    // needHours ist bereits das Mittel, das nötig ist, um das Soll bis
+    // Monatsende genau aufzubrauchen. Wer länger arbeitet als dieses Mittel,
+    // ist vorzeitig fertig – und steht dem Laden die restlichen Tage nicht
+    // mehr zur Verfügung. Bei kleinen Deputaten fällt das brutal auf: 55 h in
+    // 9-h-Diensten sind nach sechs Tagen weg, in 5-h-Diensten reichen sie für
+    // elf. Früher stand hier „der längere von zwei Würfen", also genau der
+    // umgekehrte Effekt.
+    return onPace[0];
   };
 
   // Braucht der Tag noch einen stoßzeittauglichen Dienst, wird zuerst NUR mit
@@ -610,7 +614,19 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     // decken, wird die Mindestlänge hochgezogen. Ohne das entstehen Tage mit
     // rechnerisch genug Stunden, aber falscher Aufteilung (16 h als 7 + 9),
     // und die Stoßzeit bleibt unbesetzt – verschieben hilft dann nicht mehr.
-    const stillNeedsLong = Math.min(missingCoverHours(state, isoDate), maxHours);
+    //
+    // ABER nur, wenn der Tag sich die Abdeckung überhaupt leisten kann. Sonst
+    // erzwingt die Regel eine Form, die nie aufgeht, und richtet Schaden an:
+    // die billigste Abdeckung ist 9 h + 6 h, also verlangte JEDER leere Tag
+    // zuerst einen 9-h-Dienst. Bei 26 Tagen sind das 234 h allein dafür – bei
+    // 317 h Gesamtsoll bleibt für die zweite Person kaum etwas übrig, und eine
+    // Teilzeitkraft mit 55 h ist nach sechs Diensten durch.
+    const coverHours = cheapestPeakCover(day.window).reduce((sum, h) => sum + h, 0);
+    const dayTargetHours = state.rawTarget.get(isoDate)! / 60;
+    const affordsCover = coverHours > 0 && dayTargetHours >= coverHours - 0.5;
+    const stillNeedsLong = affordsCover
+      ? Math.min(missingCoverHours(state, isoDate), maxHours)
+      : 0;
 
     const hours = chooseShiftHours(
       remaining,
@@ -638,6 +654,12 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     // hinterher und lässt halbe Monate mit Ein-Personen-Tagen zurück.
     const staffingBonus = bodiesMissing * 15;
 
+    // Der Tag braucht noch einen langen Dienst, dieser hier ist aber zu kurz:
+    // dann soll er lieber woanders hin und der Tag auf jemanden warten, der
+    // die Länge liefern kann. Ohne das füllt der erste beste Kurzdienst die
+    // Stunden des Tages auf und die Stoßzeit ist nicht mehr zu retten.
+    const shapePenalty = stillNeedsLong > 0 && hours < stillNeedsLong ? 12 : 0;
+
     const consecutivePenalty = runLength >= 5 ? (runLength - 4) * 8 : 0;
     const weekendPenalty = isWeekend(isoDate) ? weekendCount * 1.5 : 0;
 
@@ -647,6 +669,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
       deficitHours * 10 +
       staffingBonus +
       dayWeight * 3 -
+      shapePenalty -
       consecutivePenalty -
       weekendPenalty +
       jitter;
@@ -797,27 +820,41 @@ function repairDemand(state: SchedulerState, employeesById: Map<string, Employee
  * Wie der Umzug ändert der Tausch keine Dauer und verletzt keine harte Regel
  * => jedes Monats-Soll bleibt exakt erhalten.
  */
-/** Dürfen diese zwei Dienste die Tage tauschen, ohne eine harte Regel zu brechen? */
-function canSwap(state: SchedulerState, a: Shift, b: Shift): boolean {
+/**
+ * Dürfen diese zwei Dienste die Tage tauschen, ohne eine harte Regel zu brechen?
+ *
+ * `allowSameEmployee` erlaubt den Sonderfall, dass BEIDE Dienste derselben
+ * Person gehören. Dann tauschen faktisch nur die Längen zwischen zwei ihrer
+ * Arbeitstage: die Arbeitstage selbst bleiben dieselben, also können weder die
+ * Ein-Dienst-pro-Tag-Regel noch die Sechs-Tage-Regel verletzt werden. Für die
+ * Stoßzeiten-Reparatur ist das der wichtigste Zug überhaupt – ein Tag, dem ein
+ * langer Dienst fehlt, findet unter fremden Diensten oft keinen Spender, wohl
+ * aber unter den eigenen Tagen desselben Mitarbeiters.
+ */
+function canSwap(state: SchedulerState, a: Shift, b: Shift, allowSameEmployee = false): boolean {
   if (a.date === b.date) return false;
-  if (a.employeeId === b.employeeId) return false; // das wäre ein Umzug
 
-  const workedA = state.worked.get(a.employeeId)!;
-  const workedB = state.worked.get(b.employeeId)!;
-  // Höchstens ein Dienst pro Mitarbeiter und Tag.
-  if (workedA.has(b.date) || workedB.has(a.date)) return false;
+  const sameEmployee = a.employeeId === b.employeeId;
+  if (sameEmployee && !allowSameEmployee) return false; // sonst wäre es ein Umzug
+
+  if (!sameEmployee) {
+    const workedA = state.worked.get(a.employeeId)!;
+    const workedB = state.worked.get(b.employeeId)!;
+    // Höchstens ein Dienst pro Mitarbeiter und Tag.
+    if (workedA.has(b.date) || workedB.has(a.date)) return false;
+
+    // 6-Tage-Regel für beide, jeweils ohne den eigenen alten Tag.
+    const trialA = new Set(workedA);
+    trialA.delete(a.date);
+    if (consecutiveRunLengthWith(trialA, b.date) > 6) return false;
+    const trialB = new Set(workedB);
+    trialB.delete(b.date);
+    if (consecutiveRunLengthWith(trialB, a.date) > 6) return false;
+  }
 
   // Die getauschten Längen müssen in das jeweilige Fenster passen.
   if (windowLength(state.dayOf(a.date)) < presenceFromPaid(b.paidMinutes)) return false;
   if (windowLength(state.dayOf(b.date)) < presenceFromPaid(a.paidMinutes)) return false;
-
-  // 6-Tage-Regel für beide, jeweils ohne den eigenen alten Tag.
-  const trialA = new Set(workedA);
-  trialA.delete(a.date);
-  if (consecutiveRunLengthWith(trialA, b.date) > 6) return false;
-  const trialB = new Set(workedB);
-  trialB.delete(b.date);
-  if (consecutiveRunLengthWith(trialB, a.date) > 6) return false;
 
   return true;
 }
@@ -890,7 +927,8 @@ function repairPeakCapacity(state: SchedulerState, employeesById: Map<string, Em
             continue;
           }
 
-          if (!canSwap(state, short, long)) continue;
+          // Auch Tausche innerhalb derselben Person sind hier erlaubt.
+          if (!canSwap(state, short, long, true)) continue;
 
           performSwap(state, short, long, employeesById);
           improved = true;

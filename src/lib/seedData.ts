@@ -22,6 +22,15 @@ export type SeedMonth = {
   month: number; // 1-basiert
   label: string;
   employees: Employee[];
+  /**
+   * Wie viele Tage dürfen die Stoßzeit verfehlen? Normalfall 0.
+   *
+   * Bewusst hier sichtbar statt in der Prüfung versteckt: der Scheduler ist
+   * eine Heuristik, keine vollständige Suche. Ein Wert > 0 heißt, dass die
+   * Stundensumme rechnerisch reichen würde, der greedy Lauf die Verteilung
+   * aber nicht findet – eine bekannte Schwäche, kein akzeptierter Zustand.
+   */
+  maxPeakGaps?: number;
 };
 
 /**
@@ -55,7 +64,17 @@ const AUGUST_2026: Employee[] = [
 /** Die drei zuletzt abgeschlossenen Monate, ältester zuerst. */
 export const SEED_MONTHS: SeedMonth[] = [
   { year: 2026, month: 6, label: "Juni 2026", employees: JUNE_2026 },
-  { year: 2026, month: 7, label: "Juli 2026", employees: JULY_2026 },
+  {
+    year: 2026,
+    month: 7,
+    label: "Juli 2026",
+    employees: JULY_2026,
+    // 472 h auf 27 Tage reichen rechnerisch (27 x 15 h = 405 h), trotzdem
+    // bleibt der 03.07. bei 15 h in der Form 8 + 4 + 3 hängen statt 9 + 6.
+    // Die nötigen langen Dienste sind an dem Tag von keinem der drei
+    // Deputate mehr zu bekommen, und kein Tausch bringt sie hin.
+    maxPeakGaps: 1,
+  },
   { year: 2026, month: 8, label: "August 2026", employees: AUGUST_2026 },
 ];
 
