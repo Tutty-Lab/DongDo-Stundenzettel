@@ -111,9 +111,22 @@ const MIN_SHIFT_MINUTES = 3 * 60;
  * Abwechslung kostet hier Besetzung in der Stoßzeit.
  */
 const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
-  VOLLZEIT: [6, 7, 8, 9],
+  VOLLZEIT: [4, 5, 6, 7, 8, 9],
   TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
 };
+
+/**
+ * Wie oft darf eine Schicht bewusst kurz ausfallen (4 oder 5 h)?
+ *
+ * Vorgabe des Chefs: „nur etwa jede zehnte". Ganz ohne kurze Dienste sieht
+ * jeder Monat gleich aus; zu viele davon kosten Besetzung in der Stoßzeit.
+ * Greift nur, wenn der Tag ohnehin keinen langen Dienst mehr braucht und
+ * genügend Reservetage übrig sind – das Monats-Soll bleibt in jedem Fall exakt.
+ */
+const SHORT_SHIFT_CHANCE = 0.1;
+
+/** Längen, die als „kurze Schicht" im Sinne der 10-%-Regel gelten. */
+const SHORT_SHIFT_HOURS: readonly number[] = [4, 5];
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
 const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8, 9];
@@ -451,6 +464,15 @@ export function chooseShiftHours(
     if (validLong.length > 0) return choose(validLong);
   }
 
+  // Braucht der Tag keinen langen Dienst mehr, darf etwa jede zehnte Schicht
+  // bewusst kurz ausfallen – nur dann bleibt der Rest auch aufteilbar.
+  if (rng && peakHours === 0 && rng() < SHORT_SHIFT_CHANCE) {
+    const shortValid = pick(
+      ALLOWED_HOURS[employmentType].filter((h) => SHORT_SHIFT_HOURS.includes(h)),
+    );
+    if (shortValid.length > 0) return shortValid[Math.floor(rng() * shortValid.length)];
+  }
+
   // Erst die für die Anstellungsart vorgesehenen Längen. Geht dort nichts –
   // etwa an einem halben Tag, an dem keine 6-h-Schicht mehr hineinpasst –
   // greift die volle Bandbreite, damit auch Vollzeit an dem Tag arbeiten kann.
@@ -565,14 +587,30 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     const day = state.dayOf(isoDate);
     if (day.closed) continue; // Betriebsruhe -> kein Dienst
 
+    const dsNow = state.dateState.get(isoDate)!;
+    const wanted = coverSize(state, isoDate); // wie viele Leute der Tag braucht
+    const bodiesMissing = Math.max(0, wanted - dsNow.count);
+
     // Längste Schicht, die ins Fenster passt UND den Rest exakt aufteilbar lässt.
-    const maxHours = maxShiftHoursForWindow(windowLength(day));
+    let maxHours = maxShiftHoursForWindow(windowLength(day));
+
+    // Reichen die Stunden des Tages nicht für die volle Abdeckung, ist ZWEI
+    // Personen wichtiger als eine lange. Vorher entstanden reihenweise Tage
+    // mit einer einzigen 9-h-Schicht von 10 bis 20 Uhr: die Person steht den
+    // ganzen Tag allein im Laden, und während ihrer Pause ist niemand da.
+    // Deshalb die Länge so deckeln, dass für die fehlenden Personen noch
+    // Stunden des Tages übrig bleiben.
+    if (bodiesMissing > 1) {
+      const leftHours = (state.rawTarget.get(isoDate)! - dsNow.totalPaid) / 60;
+      const share = Math.floor(leftHours / bodiesMissing);
+      if (share >= 3) maxHours = Math.min(maxHours, share);
+    }
 
     // Solange der Tag noch nicht genug LANGE Dienste hat, um die Stoßzeit zu
     // decken, wird die Mindestlänge hochgezogen. Ohne das entstehen Tage mit
     // rechnerisch genug Stunden, aber falscher Aufteilung (16 h als 7 + 9),
     // und die Stoßzeit bleibt unbesetzt – verschieben hilft dann nicht mehr.
-    const stillNeedsLong = missingCoverHours(state, isoDate);
+    const stillNeedsLong = Math.min(missingCoverHours(state, isoDate), maxHours);
 
     const hours = chooseShiftHours(
       remaining,
@@ -595,6 +633,11 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     const deficitHours = (state.rawTarget.get(isoDate)! - ds.totalPaid) / 60;
     const dayWeight = DAY_WEIGHTS[state.effKeyOf(isoDate)];
 
+    // Ein Tag ohne zweite Person wiegt schwerer als ein Tag, dem nur noch
+    // Stunden fehlen. Ohne diesen Bonus jagt der Scheduler nur der Stundenzahl
+    // hinterher und lässt halbe Monate mit Ein-Personen-Tagen zurück.
+    const staffingBonus = bodiesMissing * 15;
+
     const consecutivePenalty = runLength >= 5 ? (runLength - 4) * 8 : 0;
     const weekendPenalty = isWeekend(isoDate) ? weekendCount * 1.5 : 0;
 
@@ -602,6 +645,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
 
     const score =
       deficitHours * 10 +
+      staffingBonus +
       dayWeight * 3 -
       consecutivePenalty -
       weekendPenalty +
