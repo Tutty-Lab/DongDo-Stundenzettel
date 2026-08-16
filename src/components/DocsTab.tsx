@@ -128,26 +128,38 @@ export function DocsTab() {
           highlight={(k) => LATE_SHIFT_RATIOS[k] >= 0.5}
         />
         <p className="text-slate-600">
-          App cố gắng bảo đảm <b>hai khung cao điểm</b> —{" "}
+          Giờ cao điểm:{" "}
           {PEAK_WINDOWS.map(
             (p) =>
-              `${minutesToTime(p.startMinutes)}–${minutesToTime(p.endMinutes)} (≥ ${p.minStaff} người)`,
-          ).join(" và ")}{" "}
-          — <b>suốt cả khung</b>, không phải chỉ tại một thời điểm. Đồng thời luôn có người mở cửa lúc
-          10:00 và người đóng cửa lúc 20:00.
+              `${minutesToTime(p.startMinutes)}–${minutesToTime(p.endMinutes)} cần ít nhất ${p.minStaff} người`,
+          ).join(" · ")}
+          , và phải đủ <b>suốt cả khung</b> chứ không chỉ tại một thời điểm. Mở cửa và đóng cửa thì{" "}
+          <b>một người là đủ</b>.
         </p>
         <p className="text-slate-600">
-          Nếu tổng giờ trong ngày quá ít thì <b>không thể</b> đủ 2 người — ví dụ cả quán chỉ có 2 nhân
-          viên. Khi đó lịch vẫn đúng định mức, nhưng <b>Bảng tổng quan sẽ cảnh báo</b> và liệt kê những
-          ngày bị hụt. Cách xử lý: tăng định mức, thêm người, hoặc chấp nhận ngày đó.
+          Cách rẻ nhất để phủ một ngày <b>không phải</b> hai ca dài bằng nhau. App tự dò tổ hợp rẻ
+          nhất; với khung 10:00–20:00 và cao điểm 12–18h thì đó là <b>một ca 9h</b> (lo cả mở cửa,
+          đóng cửa lẫn cao điểm) <b>cộng một ca 6h</b> thả vào giữa — tổng 15h, thay vì 16h nếu bắt
+          cả hai ca phải neo vào hai đầu.
+        </p>
+        <p className="text-slate-600">
+          Nếu ngày đó <b>không đủ giờ</b> để phủ, app <b>không</b> ép ca dài nữa — ép cũng vô ích và
+          còn ngốn hết giờ của người thứ hai. Khi đó app ưu tiên <b>có 2 người trong ngày</b> hơn là
+          một người làm ca thật dài, vì người thứ hai chính là người đỡ lúc người kia nghỉ giữa ca.
+          Những ngày còn hụt sẽ được <b>Bảng tổng quan cảnh báo</b> kèm danh sách ngày.
         </p>
       </Section>
 
       <Section title="3) Độ dài ca và giờ nghỉ">
         <p>
-          Ca sáng bắt đầu ở đầu khung giờ, ca tối kết thúc ở cuối khung. Nếu một ngày mở{" "}
-          <b>ngắn hơn</b> (VD nửa buổi), ca sẽ <b>tự co ngắn lại</b> cho vừa khung — kể cả nhân viên toàn
-          thời gian vẫn đi làm ca ngắn hôm đó, và <b>định mức tháng vẫn được bù đủ</b> ở các ngày khác.
+          Ca sáng bám đầu khung giờ, ca tối bám cuối khung. Nhưng ca <b>không bắt buộc</b> phải neo
+          vào hai đầu: nếu cần phủ cao điểm, app sẽ <b>đẩy ca vào giữa ngày</b> (VD 11:30–18:00).
+          Người mở cửa và người đóng cửa thì luôn có.
+        </p>
+        <p>
+          Nếu một ngày mở <b>ngắn hơn</b> (VD nửa buổi), ca sẽ <b>tự co ngắn lại</b> cho vừa khung —
+          kể cả nhân viên toàn thời gian vẫn đi làm ca ngắn hôm đó, và <b>định mức tháng vẫn được bù
+          đủ</b> ở các ngày khác.
         </p>
         <p>
           Giờ nghỉ <b>không trừ vào giờ công</b> mà kéo dài thời gian có mặt. Ví dụ ca 9 giờ công chiếm
@@ -191,9 +203,15 @@ export function DocsTab() {
           </table>
         </div>
         <p className="text-slate-600">
-          Nhân viên <b>toàn thời gian</b> chủ yếu nhận ca dài, nhưng mỗi tháng vẫn được vài ca ngắn
-          (4–5 giờ) để lịch không bị lặp cứng — chỉ khi tháng đó còn dư ngày. Ca <b>3 giờ</b> dành riêng
-          cho nhân viên bán thời gian.
+          App chọn <b>ca ngắn nhất còn kịp tiến độ</b>, không phải ca dài nhất. Lý do: định mức tháng
+          chia cho số ngày còn làm được ra một nhịp trung bình; ai làm dài hơn nhịp đó sẽ hết giờ
+          sớm và những ngày cuối tháng quán không còn người. Ví dụ <b>55h</b> mà chia ca 9h thì hết
+          sau 6 ngày, chia ca 5h thì đủ cho 11 ngày.
+        </p>
+        <p className="text-slate-600">
+          Khoảng <b>1/10</b> số ca được rút ngắn còn 4–5 giờ cho lịch đỡ đều đều — chỉ áp dụng khi
+          ngày đó không còn cần ca dài để phủ cao điểm. Ca <b>3 giờ</b> dành riêng cho nhân viên bán
+          thời gian.
         </p>
       </Section>
 
@@ -222,6 +240,32 @@ export function DocsTab() {
             <b>Giờ làm riêng</b> (VD nghỉ nửa ngày): mọi người làm ca ngắn lọt khung giờ đó.
           </li>
         </ul>
+      </Section>
+
+      <Section title="6) In lịch và khoá tháng">
+        <p>
+          Ở tab <b>Bảng chấm công</b> có mục <b>In lịch làm việc</b>: in <b>cả tháng</b> hoặc in{" "}
+          <b>từng tuần</b>.
+        </p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>
+            <b>Bản tuần</b> xếp giống bảng trong app: nhân viên theo dòng, 7 ngày theo cột, kèm cột
+            tổng giờ mỗi người và dòng số người mỗi ngày. Đây là bản treo ở quán.
+          </li>
+          <li>
+            <b>Bản tháng</b> xếp ngày theo dòng — 31 cột ngày không lọt khổ giấy A4 dọc. Bản này chỉ
+            để xem tổng thể.
+          </li>
+        </ul>
+        <p>
+          <b>In một tuần bất kỳ sẽ khoá lịch cả tháng đó.</b> Sau khi khoá: không sửa được ca, không
+          tạo lại lịch, không đổi nhân viên — nhưng vẫn in được. Mục đích là để bản giấy đang treo ở
+          quán luôn khớp với dữ liệu trong hệ thống khi bị kiểm tra. In cả tháng thì không khoá gì.
+        </p>
+        <p className="text-slate-600">
+          Cần sửa thì bấm <b>Mở khoá</b> ở ngay khung cảnh báo (tab Bảng chấm công), xác nhận một
+          lần nữa. Sửa xong nhớ <b>in lại tuần đó và thay bản cũ</b>.
+        </p>
       </Section>
 
       <Section title="Lưu ý về tờ Stundenzettel">
