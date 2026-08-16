@@ -17,6 +17,8 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   const [scheduleRange, setScheduleRange] = useState<{ dates: string[]; title: string } | null>(
     null,
   );
+  /** Zweiter Klick für das Entsperren – ohne native Dialoge, siehe unten. */
+  const [confirmUnlock, setConfirmUnlock] = useState(false);
 
   const weeks = useMemo(
     () => weeksOfMonth(schedule.year, schedule.month),
@@ -159,19 +161,45 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
               <div className="mt-0.5">
                 Không sửa được ca, không tạo lại lịch, không đổi nhân viên. Vẫn in được bình thường.
               </div>
-              <button
-                onClick={() => {
-                  const ok = window.confirm(
-                    "Mở khóa lịch tháng này?\n\n" +
-                      "Bản đã in ở quán sẽ không còn khớp với hệ thống. " +
-                      "Sau khi sửa, hãy in lại tuần đó và thay bản cũ.",
-                  );
-                  if (ok) unlockMonth();
-                }}
-                className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
-              >
-                Mở khóa
-              </button>
+
+              {/*
+                Bewusst KEIN window.confirm: In-App-Browser (Messenger,
+                Facebook) unterdrücken die native Rückfrage teilweise. Sie
+                liefert dann stillschweigend false, der Klick tut nichts, und
+                niemand erfährt warum. Die Rückfrage steht deshalb direkt hier.
+              */}
+              {!confirmUnlock ? (
+                <button
+                  onClick={() => setConfirmUnlock(true)}
+                  className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Mở khóa
+                </button>
+              ) : (
+                <div className="mt-2 rounded border border-amber-300 bg-white px-3 py-2">
+                  <div className="text-amber-900">
+                    Mở khóa lịch tháng này? Bản đã in ở quán sẽ không còn khớp với hệ thống. Sau
+                    khi sửa, hãy in lại tuần đó và thay bản cũ.
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => {
+                        unlockMonth();
+                        setConfirmUnlock(false);
+                      }}
+                      className="rounded bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700"
+                    >
+                      Xác nhận mở khóa
+                    </button>
+                    <button
+                      onClick={() => setConfirmUnlock(false)}
+                      className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+                    >
+                      Huỷ
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
