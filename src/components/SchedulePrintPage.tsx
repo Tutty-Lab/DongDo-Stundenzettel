@@ -1,26 +1,51 @@
 import type { Schedule, Shift } from "../types";
-import { parseIsoDate, WEEKDAY_LABELS_DE, weekdayKeyOf } from "../lib/demand";
+import {
+  parseIsoDate,
+  WEEKDAY_LABELS_DE,
+  WEEKDAY_SHORT_DE,
+  weekdayKeyOf,
+} from "../lib/demand";
 import { minutesToShortHours, minutesToTime } from "../lib/time";
-import { publicHolidayNames } from "../lib/holidays";
+import { publicHolidayNames, publicHolidays } from "../lib/holidays";
 import { isDayClosed } from "../lib/workHours";
-import { publicHolidays } from "../lib/holidays";
 import { format } from "date-fns";
 
 /**
- * Druckbarer Dienstplan für einen Zeitraum (ganzer Monat oder eine Woche).
+ * Wie herum die Tabelle steht.
  *
- * Zeilen sind Tage, Spalten die Mitarbeiter – nicht umgekehrt. Der Laden hat
- * eine Handvoll Beschäftigte, aber bis zu 31 Tage; so passt der Monatsplan
- * hochkant auf A4, ohne dass etwas abgeschnitten wird.
+ * "byEmployee" – Mitarbeiter als Zeilen, Tage als Spalten. Genau wie das
+ *   Raster in der App, und für eine Woche (7 Spalten) auch auf Papier gut.
+ * "byDate" – Tage als Zeilen. Für einen ganzen Monat die einzige Variante,
+ *   die hochkant auf A4 passt: 31 Tagesspalten tun das nicht.
  */
+export type SchedulePrintLayout = "byEmployee" | "byDate";
+
+function ShiftCell({ shift, closed }: { shift: Shift | undefined; closed: boolean }) {
+  if (!shift) return <span className="text-slate-400">{closed ? "—" : "frei"}</span>;
+  return (
+    <>
+      <div className="whitespace-nowrap">
+        {minutesToTime(shift.startMinutes)}–{minutesToTime(shift.endMinutes)}
+      </div>
+      <div className="text-[10px] text-slate-500">
+        {minutesToShortHours(shift.paidMinutes)}
+        {shift.pauseMinutes > 0 && ` · P ${shift.pauseMinutes}`}
+      </div>
+    </>
+  );
+}
+
+/** Druckbarer Dienstplan für einen Zeitraum (ganzer Monat oder eine Woche). */
 export function SchedulePrintPage({
   schedule,
   dates,
   title,
+  layout = "byDate",
 }: {
   schedule: Schedule;
   dates: string[];
   title: string;
+  layout?: SchedulePrintLayout;
 }) {
   const byKey = new Map<string, Shift>();
   for (const s of schedule.shifts) byKey.set(`${s.employeeId}#${s.date}`, s);
@@ -28,6 +53,10 @@ export function SchedulePrintPage({
   const holidays = publicHolidays(schedule.year);
   const holidayNames = publicHolidayNames(schedule.year);
   const overrides = Object.fromEntries(schedule.dateOverrides.map((o) => [o.date, o]));
+  const closedOn = (d: string) => isDayClosed(schedule.workHours, d, holidays, overrides);
+
+  const th = "border border-slate-300 px-2 py-1 font-semibold";
+  const td = "border border-slate-300 px-2 py-[3px]";
 
   return (
     <div className="stundenzettel-page bg-white text-slate-900 mx-auto max-w-[210mm] p-6 text-[12px]">
@@ -42,57 +71,89 @@ export function SchedulePrintPage({
         </div>
       </div>
 
-      <table className="w-full border-collapse text-[11px]">
-        <thead>
-          <tr className="bg-slate-100">
-            <th className="border border-slate-300 px-2 py-1 text-left font-semibold">Datum</th>
-            <th className="border border-slate-300 px-2 py-1 text-left font-semibold">Wochentag</th>
-            {schedule.employees.map((e) => (
-              <th key={e.id} className="border border-slate-300 px-2 py-1 text-center font-semibold">
-                {e.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {dates.map((d) => {
-            const closed = isDayClosed(schedule.workHours, d, holidays, overrides);
-            const holiday = holidayNames.get(d);
-            const wd = WEEKDAY_LABELS_DE[weekdayKeyOf(parseIsoDate(d))];
-            return (
-              <tr key={d} className={closed ? "bg-slate-50" : ""}>
-                <td className="border border-slate-300 px-2 py-[3px]">
-                  {format(parseIsoDate(d), "dd.MM.yyyy")}
-                </td>
-                <td className="border border-slate-300 px-2 py-[3px]">
-                  {wd}
-                  {holiday && <span className="text-slate-500"> · {holiday}</span>}
-                </td>
-                {schedule.employees.map((e) => {
-                  const s = byKey.get(`${e.id}#${d}`);
-                  return (
-                    <td key={e.id} className="border border-slate-300 px-2 py-[3px] text-center">
-                      {s ? (
-                        <>
-                          <div>
-                            {minutesToTime(s.startMinutes)}–{minutesToTime(s.endMinutes)}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {minutesToShortHours(s.paidMinutes)}
-                            {s.pauseMinutes > 0 && ` · P ${s.pauseMinutes}`}
-                          </div>
-                        </>
-                      ) : (
-                        <span className="text-slate-400">{closed ? "—" : "frei"}</span>
-                      )}
+      {layout === "byEmployee" ? (
+        // Mitarbeiter als Zeilen, Tage als Spalten – wie in der App.
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="bg-slate-100">
+              <th className={`${th} text-left`}>Mitarbeiter</th>
+              {dates.map((d) => (
+                <th key={d} className={`${th} text-center`}>
+                  <div>{WEEKDAY_SHORT_DE[weekdayKeyOf(parseIsoDate(d))]}</div>
+                  <div className="font-normal">{format(parseIsoDate(d), "dd.MM.")}</div>
+                </th>
+              ))}
+              <th className={`${th} text-right`}>Summe</th>
+            </tr>
+          </thead>
+          <tbody>
+            {schedule.employees.map((e) => {
+              const own = dates.map((d) => byKey.get(`${e.id}#${d}`));
+              const total = own.reduce((sum, s) => sum + (s?.paidMinutes ?? 0), 0);
+              return (
+                <tr key={e.id}>
+                  <td className={`${td} whitespace-nowrap`}>{e.name}</td>
+                  {dates.map((d, i) => (
+                    <td key={d} className={`${td} text-center ${closedOn(d) ? "bg-slate-50" : ""}`}>
+                      <ShiftCell shift={own[i]} closed={closedOn(d)} />
                     </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  ))}
+                  <td className={`${td} text-right font-medium`}>{minutesToShortHours(total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-slate-100">
+              <td className={`${td} text-left font-semibold`}>Besetzung</td>
+              {dates.map((d) => {
+                const n = schedule.employees.filter((e) => byKey.has(`${e.id}#${d}`)).length;
+                return (
+                  <td key={d} className={`${td} text-center`}>
+                    {closedOn(d) ? "—" : n}
+                  </td>
+                );
+              })}
+              <td className={td} />
+            </tr>
+          </tfoot>
+        </table>
+      ) : (
+        // Tage als Zeilen – für den ganzen Monat.
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="bg-slate-100">
+              <th className={`${th} text-left`}>Datum</th>
+              <th className={`${th} text-left`}>Wochentag</th>
+              {schedule.employees.map((e) => (
+                <th key={e.id} className={`${th} text-center`}>
+                  {e.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dates.map((d) => {
+              const closed = closedOn(d);
+              const holiday = holidayNames.get(d);
+              return (
+                <tr key={d} className={closed ? "bg-slate-50" : ""}>
+                  <td className={td}>{format(parseIsoDate(d), "dd.MM.yyyy")}</td>
+                  <td className={td}>
+                    {WEEKDAY_LABELS_DE[weekdayKeyOf(parseIsoDate(d))]}
+                    {holiday && <span className="text-slate-500"> · {holiday}</span>}
+                  </td>
+                  {schedule.employees.map((e) => (
+                    <td key={e.id} className={`${td} text-center`}>
+                      <ShiftCell shift={byKey.get(`${e.id}#${d}`)} closed={closed} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
 
       <div className="mt-8 grid grid-cols-2 gap-8 text-[11px]">
         <div className="border-t border-slate-500 pt-1 mt-8 text-slate-600">

@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee } from "../types";
 import { StundenzettelPage } from "./StundenzettelPage";
-import { SchedulePrintPage } from "./SchedulePrintPage";
+import { SchedulePrintPage, type SchedulePrintLayout } from "./SchedulePrintPage";
 import { elementsToPdf, safeFileName } from "../lib/pdf";
 import { weeksOfMonth } from "../lib/weeks";
 import { datesOfMonth } from "../lib/demand";
@@ -14,9 +14,11 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   const [selectedId, setSelectedId] = useState<string>(schedule.employees[0]?.id ?? "");
   const [printList, setPrintList] = useState<Employee[] | null>(null);
   /** Dienstplan-Ausdruck (Monat oder Woche). Nie gleichzeitig mit printList. */
-  const [scheduleRange, setScheduleRange] = useState<{ dates: string[]; title: string } | null>(
-    null,
-  );
+  const [scheduleRange, setScheduleRange] = useState<{
+    dates: string[];
+    title: string;
+    layout: SchedulePrintLayout;
+  } | null>(null);
   /** Zweiter Klick für das Entsperren – ohne native Dialoge, siehe unten. */
   const [confirmUnlock, setConfirmUnlock] = useState(false);
 
@@ -49,11 +51,16 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
    * danach im Laden und muss mit dem Stand im System übereinstimmen. Der
    * Monatsausdruck ist nur eine Übersicht und sperrt nichts.
    */
-  function printSchedule(dates: string[], title: string, weekStart?: string) {
+  function printSchedule(
+    dates: string[],
+    title: string,
+    layout: SchedulePrintLayout,
+    weekStart?: string,
+  ) {
     if (dates.length === 0) return;
     flushSync(() => {
       setPrintList(null);
-      setScheduleRange({ dates, title });
+      setScheduleRange({ dates, title, layout });
     });
     window.print();
     if (weekStart) markWeekPrinted(weekStart);
@@ -110,6 +117,8 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
                     printSchedule(
                       datesOfMonth(schedule.year, schedule.month),
                       monthLabel(schedule.year, schedule.month),
+                      // 31 Tagesspalten passen nicht hochkant auf A4.
+                      "byDate",
                     )
                   }
                   className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
@@ -126,6 +135,9 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
                         printSchedule(
                           w.dates,
                           `Woche ${w.label} · ${monthLabel(schedule.year, schedule.month)}`,
+                          // Wie das Raster in der App: Leute untereinander,
+                          // Tage nebeneinander. Bei 7 Spalten passt das gut.
+                          "byEmployee",
                           w.weekStart,
                         )
                       }
@@ -283,6 +295,7 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
             schedule={schedule}
             dates={scheduleRange.dates}
             title={scheduleRange.title}
+            layout={scheduleRange.layout}
           />
         ) : (
           (printList ?? []).map((emp) => (
