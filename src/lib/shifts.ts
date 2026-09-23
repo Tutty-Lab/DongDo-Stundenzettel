@@ -17,8 +17,8 @@ export type ShiftTemplate = {
   type: TemplateType;
 };
 
-/** Erlaubte Schichtlängen in Stunden (Dong Do: 3 h bis 9 h bezahlt). */
-export const SHIFT_LENGTHS = [3, 4, 5, 6, 7, 8, 9] as const;
+/** Erlaubte Schichtlängen in Stunden (Dong Do: 3 h bis 8 h bezahlt). */
+export const SHIFT_LENGTHS = [3, 4, 5, 6, 7, 8] as const;
 
 const DEFAULT_OPEN = 10 * 60; // 10:00
 const DEFAULT_CLOSE = 22 * 60; // 22:00

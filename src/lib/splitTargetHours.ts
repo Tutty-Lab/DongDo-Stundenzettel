@@ -2,10 +2,10 @@
 // Zerlegt die monatlichen Sollstunden eines Mitarbeiters in Schichtlängen.
 // Reine Funktion, deterministisch, über eine kleine DP realisiert.
 //
-// Erlaubte Längen: 3..9 h (siehe SHIFT_LENGTHS).
+// Erlaubte Längen: 3..8 h (siehe SHIFT_LENGTHS).
 // Die Summe der zurückgegebenen Längen ergibt exakt targetHours.
 //
-// Vollzeit: bevorzugt die längsten Schichten (9 h), minimiert die Anzahl der
+// Vollzeit: bevorzugt die längsten Schichten (8 h), minimiert die Anzahl der
 //           Schichten, kürzere Längen nur um das exakte Soll zu treffen.
 // Teilzeit: bevorzugt 4/5/6 h (Schwerpunkt 5), 7/8/9 h nur im Notfall,
 //           vermeidet unnötig viele Arbeitstage.
@@ -69,7 +69,7 @@ export function splitTargetHours(
 
   if (dpCost[targetHours] === INF) {
     throw new Error(
-      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 3–9 giờ).`,
+      `Không thể tạo tổ hợp ca hợp lệ cho ${targetHours} h (ca phải từ 3–8 giờ).`,
     );
   }
 

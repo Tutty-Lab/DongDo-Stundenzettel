@@ -27,7 +27,7 @@ export type ValidationResult = {
   summaries: EmployeeSummary[];
 };
 
-const MAX_PAID_MINUTES = 9 * 60;
+const MAX_PAID_MINUTES = 8 * 60;
 const MAX_CONSECUTIVE_DAYS = 6;
 
 export function validateSchedule(
