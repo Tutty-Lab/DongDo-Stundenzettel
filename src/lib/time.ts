@@ -25,16 +25,24 @@ export function minutesToTime(totalMinutes: number): string {
 }
 
 /**
- * Pausenregel:
- * - Làm việc liên tục trên 6 tiếng (> 6h): nghỉ giải lao 30 phút.
- * - Làm việc liên tục trên 8 tiếng (> 8h): nghỉ giải lao 60 phút.
- * - Từ 6 tiếng trở xuống (<= 6h): không tính nghỉ giải lao (0 phút).
+ * Pausenregel (Vorgabe des Chefs, Dong Do Imbiss), gestaffelt:
+ *   unter 6 h -> keine Pause
+ *   6 bis 8 h -> 30 Minuten
+ *   ab 9 h    -> 60 Minuten
  *
- * Tiêu chuẩn này cao hơn hoặc bằng luật lao động Đức (§ 4 ArbZG: > 6h là 30 min, > 9h là 45 min).
+ * Damit liegt der Betrieb über dem gesetzlichen Mindestmaß (ArbZG §4: über
+ * 6 h => 30 min, über 9 h => 45 min).
+ *
+ * Die Pause kommt ZUSÄTZLICH zur bezahlten Zeit: presence = paid + pause.
+ * Eine 9-h-Schicht belegt damit 10 h Anwesenheit und füllt das Fenster
+ * 10:00–20:00 exakt aus; eine 8-h-Schicht belegt 8,5 h.
+ *
+ * Alle Zeit-/Schichtberechnungen leiten sich von dieser einen Funktion ab –
+ * eine andere Pausenstaffel zu fahren betrifft nur diese Stelle.
  */
 export function calculatePause(paidMinutes: number): number {
-  if (paidMinutes > 8 * 60) return 60;
-  if (paidMinutes > 6 * 60) return 30;
+  if (paidMinutes >= 9 * 60) return 60;
+  if (paidMinutes >= 6 * 60) return 30;
   return 0;
 }
 
@@ -69,6 +77,6 @@ export function minutesToShortHours(totalMinutes: number): string {
   const hours = totalMinutes / 60;
   const text = Number.isInteger(hours)
     ? String(hours)
-    : hours.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    : hours.toLocaleString("de-DE", { maximumFractionDigits: 2 });
   return `${text}h`;
 }
