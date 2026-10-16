@@ -1,5 +1,5 @@
 // ============================================================================
-// Kundennachfrage-Konzept: Tagesgewichte + gewünschte Spätschicht-Anteile.
+// Kundennachfrage-Konzept: Tagesgewichte je Wochentag.
 // ============================================================================
 
 import { eachDayOfInterval, endOfMonth, format, getDay, startOfMonth } from "date-fns";
@@ -16,8 +16,7 @@ export type WeekdayKey =
 /**
  * Nachfrage-Gewichte je Wochentag (keine Mitarbeiterzahlen!).
  * Vorgabe des Chefs (Dong Do Imbiss): die vollen Tage sind Di–Sa. Montag ist
- * ruhig, Sonntag ist geschlossen (siehe closedWeekdays in workHours). Das
- * Gewicht steuert nur, wie viele Stunden ein offener Tag bekommt.
+ * ruhig, Sonntag geschlossen.
  */
 export const DAY_WEIGHTS: Record<WeekdayKey, number> = {
   monday: 1.0, // ruhig
@@ -27,22 +26,6 @@ export const DAY_WEIGHTS: Record<WeekdayKey, number> = {
   friday: 1.5,
   saturday: 1.5,
   sunday: 1.0, // geschlossen (Gewicht nur relevant, falls doch geöffnet)
-};
-
-/**
- * Gewünschter Anteil an Spätschicht-Stunden je Wochentag.
- * Dong Do ist ein Imbiss (10–20 Uhr) in einem Büro-/Gewerbegebiet: das
- * Mittagsgeschäft trägt den Tag, der Abend endet früh (20 Uhr). Deshalb liegt
- * der Spätanteil bewusst UNTER der Hälfte – die Mittagsspitze ist die größere.
- */
-export const LATE_SHIFT_RATIOS: Record<WeekdayKey, number> = {
-  monday: 0.45,
-  tuesday: 0.45,
-  wednesday: 0.45,
-  thursday: 0.45,
-  friday: 0.48,
-  saturday: 0.5,
-  sunday: 0.45,
 };
 
 /** date-fns getDay(): 0=So ... 6=Sa  ->  WeekdayKey. */
@@ -106,14 +89,6 @@ export function datesOfMonth(year: number, month: number): string[] {
   const first = startOfMonth(new Date(year, month - 1, 1));
   const last = endOfMonth(first);
   return eachDayOfInterval({ start: first, end: last }).map((d) => format(d, "yyyy-MM-dd"));
-}
-
-export function dayWeightOf(isoDate: string): number {
-  return DAY_WEIGHTS[weekdayKeyOf(parseIsoDate(isoDate))];
-}
-
-export function lateRatioOf(isoDate: string): number {
-  return LATE_SHIFT_RATIOS[weekdayKeyOf(parseIsoDate(isoDate))];
 }
 
 /** ISO "yyyy-MM-dd" -> lokales Date (ohne Zeitzonen-Verschiebung). */
