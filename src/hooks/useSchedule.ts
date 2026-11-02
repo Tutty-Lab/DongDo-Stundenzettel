@@ -314,6 +314,7 @@ export function useSchedule() {
     setGenError(null);
     try {
       const shifts = generateSchedule({
+        allowPartial: true,
         year: schedule.year,
         month: schedule.month,
         workHours: schedule.workHours,

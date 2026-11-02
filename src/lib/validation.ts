@@ -24,6 +24,7 @@ export type EmployeeSummary = {
 export type ValidationResult = {
   valid: boolean;
   errors: ValidationError[];
+  warnings: ValidationError[];
   summaries: EmployeeSummary[];
 };
 
@@ -35,6 +36,7 @@ export function validateSchedule(
   shifts: Shift[],
 ): ValidationResult {
   const errors: ValidationError[] = [];
+  const warnings: ValidationError[] = [];
   const shiftsByEmployee = new Map<string, Shift[]>();
   for (const emp of employees) shiftsByEmployee.set(emp.id, []);
   for (const shift of shifts) {
@@ -101,7 +103,13 @@ export function validateSchedule(
     const assignedMinutes = empShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
     const maxRun = maxConsecutiveRun(empShifts.map((s) => s.date));
 
-    if (assignedMinutes !== emp.targetMinutes) {
+    if (assignedMinutes < emp.targetMinutes) {
+      warnings.push({
+        employeeId: emp.id,
+        message: `${emp.name}: đã xếp ${assignedMinutes / 60} / ${emp.targetMinutes / 60} giờ, còn thiếu ${(emp.targetMinutes - assignedMinutes) / 60} giờ. Kiểm tra ngày làm được, giới hạn ngày làm mỗi tuần và giờ mở cửa.`,
+      });
+    }
+    if (assignedMinutes > emp.targetMinutes) {
       errors.push({
         employeeId: emp.id,
         message: `${emp.name}: chưa đạt giờ định mức: ${assignedMinutes / 60} h thay vì ${emp.targetMinutes / 60} h.`,
@@ -124,5 +132,5 @@ export function validateSchedule(
     });
   }
 
-  return { valid: errors.length === 0, errors, summaries };
+  return { valid: errors.length === 0, errors, warnings, summaries };
 }

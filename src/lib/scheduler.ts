@@ -41,6 +41,8 @@ import {
 import { publicHolidays } from "./holidays";
 
 export type GenerateInput = {
+  /** Return a partial plan when monthly targets cannot be met. */
+  allowPartial?: boolean;
   year: number;
   month: number; // 1-basiert
   /** Arbeitszeit-Fenster je Wochentag + Feiertag. */
@@ -1525,7 +1527,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   if (incomplete(state)) state = attempt(false);
 
   const unmet = employees.filter((e) => state.remaining.get(e.id)! > 0);
-  if (unmet.length > 0) {
+  if (unmet.length > 0 && !input.allowPartial) {
     throw new Error(buildUnmetMessage(state, unmet, dates, dayOf));
   }
 

@@ -20,12 +20,12 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
   const statusValue = notGenerated
     ? "Chưa tạo lịch"
     : validation.valid
-      ? "Hợp lệ"
+      ? validation.warnings.length > 0 ? `${validation.warnings.length} cảnh báo` : "Hợp lệ"
       : `${validation.errors.length} lỗi`;
   const statusAccent = notGenerated
     ? "text-slate-500"
     : validation.valid
-      ? "text-emerald-600"
+      ? validation.warnings.length > 0 ? "text-amber-600" : "text-emerald-600"
       : "text-rose-600";
 
   const pct = targetMin > 0 ? Math.min(100, Math.round((plannedMin / targetMin) * 100)) : 0;
@@ -63,9 +63,15 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
           Chưa có lịch — bấm Tạo lịch.
         </div>
       )}
-      {validation.valid && schedule.shifts.length > 0 && (
+      {validation.valid && validation.warnings.length === 0 && schedule.shifts.length > 0 && (
         <div className="mt-2 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-3 py-2">
           Tất cả giờ định mức đã được phân bổ chính xác.
+        </div>
+      )}
+      {validation.warnings.length > 0 && (
+        <div className="mt-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          <div className="font-medium">Cảnh báo: lịch chưa đủ giờ định mức.</div>
+          {validation.warnings.map((warning, i) => <div key={i}>{warning.message}</div>)}
         </div>
       )}
       {/*
