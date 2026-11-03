@@ -160,6 +160,22 @@ function coverageAt(shifts: Shift[], t: number): number {
   return n;
 }
 
+/** Integral of missing staff over peak windows, in person-minutes. */
+function peakShortageMinutes(shifts: Shift[], window: DayWindow): number {
+  let total = 0;
+  for (const peak of PEAK_WINDOWS) {
+    const from = Math.max(peak.startMinutes, window.startMinutes);
+    const to = Math.min(peak.endMinutes, window.endMinutes);
+    if (to <= from) continue;
+    const points = [...new Set([from, to, ...shifts.flatMap(s =>
+      [s.startMinutes, s.endMinutes].filter(t => t > from && t < to))])].sort((a, b) => a - b);
+    for (let i = 0; i < points.length - 1; i++) {
+      total += Math.max(0, peak.minStaff - coverageAt(shifts, points[i])) * (points[i + 1] - points[i]);
+    }
+  }
+  return total;
+}
+
 /**
  * Kleinste Besetzung im halboffenen Intervall [from, to).
  * Die Besetzung ändert sich nur an Schichtgrenzen, deshalb genügt es, den
@@ -1227,6 +1243,12 @@ function candidateStarts(shift: Shift, window: DayWindow): number[] {
   if (latest < window.startMinutes) return [window.startMinutes];
 
   const out = new Set<number>([window.startMinutes, latest]);
+  // Short shifts can hand over inside a peak instead of covering it alone.
+  for (const peak of PEAK_WINDOWS) {
+    for (const start of [peak.startMinutes, peak.endMinutes - presence]) {
+      if (start >= window.startMinutes && start <= latest) out.add(start);
+    }
+  }
   for (const peak of PEAK_WINDOWS) {
     const from = Math.max(peak.startMinutes, window.startMinutes);
     const to = Math.min(peak.endMinutes, window.endMinutes);
@@ -1278,7 +1300,7 @@ function arrangeForPeaks(window: DayWindow, onDay: Shift[]): void {
 
   let bestStarts = [...starts];
   // Eine Ausgangslage ohne Auf- oder Zusperrer zählt nicht als Lösung.
-  let bestDeficit = opensAndCloses() ? peakDeficit(onDay, window) : Number.POSITIVE_INFINITY;
+  let bestDeficit = opensAndCloses() ? peakShortageMinutes(onDay, window) : Number.POSITIVE_INFINITY;
 
   for (let i = 0; i < onDay.length && bestDeficit > 0; i++) {
     // i === j ist ausdrücklich erlaubt: ein Dienst, der das ganze Fenster
@@ -1302,7 +1324,7 @@ function arrangeForPeaks(window: DayWindow, onDay: Shift[]): void {
         let pickDeficit = Number.POSITIVE_INFINITY;
         for (const c of candidateStarts(onDay[k], window)) {
           moveShiftTo(onDay[k], c);
-          const d = peakDeficit(onDay, window);
+          const d = peakShortageMinutes(onDay, window);
           if (d < pickDeficit) {
             pickDeficit = d;
             pick = c;
@@ -1311,7 +1333,7 @@ function arrangeForPeaks(window: DayWindow, onDay: Shift[]): void {
         moveShiftTo(onDay[k], pick);
       }
 
-      const deficit = peakDeficit(onDay, window);
+      const deficit = opensAndCloses() ? peakShortageMinutes(onDay, window) : Number.POSITIVE_INFINITY;
       if (deficit < bestDeficit) {
         bestDeficit = deficit;
         bestStarts = onDay.map((s) => s.startMinutes);
@@ -1415,6 +1437,68 @@ function buildUnmetMessage(
     `thuyết ${full.maxMinutes / 60}h/người, thực tế thấp hơn. ` +
     `Hãy giảm định mức, nới khung giờ làm, bớt ngày đóng cửa, hoặc thêm người.`
   );
+}
+
+/** Move existing shifts between days using actual achievable peak coverage.
+ * Shift duration and employee totals stay unchanged. Cache only within this run.
+ */
+function optimizePeakMoves(state: SchedulerState, employeesById: Map<string, Employee>): void {
+  const cache = new Map<string, number>();
+  const score = (date: string, shifts: Shift[]): number => {
+    const window = state.dayOf(date).window;
+    const key = `${window.startMinutes}:${window.endMinutes}:${shifts.map(s => s.paidMinutes).sort((a,b)=>a-b).join(",")}`;
+    let coverage = cache.get(key);
+    if (coverage === undefined) {
+      const probe = shifts.map(s => ({ ...s,
+        startMinutes: window.startMinutes,
+        endMinutes: window.startMinutes + presenceFromPaid(s.paidMinutes),
+      }));
+      arrangeForPeaks(window, probe);
+      const shortage = peakShortageMinutes(probe, window);
+      const opens = probe.some(s => s.startMinutes === window.startMinutes);
+      const closes = probe.some(s => s.endMinutes === window.endMinutes);
+      coverage = (opens && closes ? 0 : 1e8) + (shortage > 0 ? 1e6 : 0) + shortage * 100;
+      cache.set(key, coverage);
+    }
+    const paid = shifts.reduce((n,s)=>n+s.paidMinutes,0);
+    return coverage + Math.abs(paid - state.rawTarget.get(date)!);
+  };
+  for (let pass = 0; pass < 30; pass++) {
+    const byDate = new Map(state.dates.map(d => [d, state.shifts.filter(s => s.date === d)]));
+    let best: { shift: Shift; to: string } | undefined;
+    let bestDelta = -1e-6;
+    for (const shift of state.shifts) {
+      const employee = employeesById.get(shift.employeeId)!;
+      const worked = state.worked.get(employee.id)!;
+      const from = shift.date;
+      const source = byDate.get(from)!;
+      // Preserve staffed opening and closing on every open day.
+      if (source.length <= 2) continue;
+      const without = source.filter(s => s !== shift);
+      const sourceDelta = score(from, without) - score(from, source);
+      for (const to of state.dates) {
+        if (to === from || worked.has(to) || !mayWorkOn(employee, to)) continue;
+        const day = state.dayOf(to);
+        if (day.closed || windowLength(day) < presenceFromPaid(shift.paidMinutes)) continue;
+        if (!weekDayRoomLeft(state, employee, to, from)) continue;
+        const trial = new Set(worked);
+        trial.delete(from);
+        if (consecutiveRunLengthWith(trial, to) > 6) continue;
+        const destination = byDate.get(to)!;
+        const delta = sourceDelta + score(to, [...destination, shift]) - score(to, destination);
+        if (delta < bestDelta) { bestDelta = delta; best = { shift, to }; }
+      }
+    }
+    if (!best) break;
+    const { shift, to } = best;
+    const employee = employeesById.get(shift.employeeId)!;
+    const from = shift.date;
+    removeShift(state, shift);
+    applyShift(state, makeShift(state, employee, to, shift.paidMinutes));
+    for (const date of [from, to]) {
+      arrangeForPeaks(state.dayOf(date).window, state.shifts.filter(s => s.date === date));
+    }
+  }
 }
 
 /**
@@ -1537,6 +1621,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   // Erst danach: die Stundenbilanz steht, jetzt die Form für die Stoßzeit.
   repairPeakCapacity(state, employeesById);
   balanceShiftTypes(state);
+  optimizePeakMoves(state, employeesById);
 
   // Stabil sortieren: nach Datum, dann Startzeit, dann Mitarbeiter.
   state.shifts.sort(
