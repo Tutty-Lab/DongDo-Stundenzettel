@@ -102,11 +102,20 @@ export function validateSchedule(
 
     const assignedMinutes = empShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
     const maxRun = maxConsecutiveRun(empShifts.map((s) => s.date));
+    if (emp.targetMinutes < 100 * 60) {
+      for (const shift of empShifts) {
+        if (shift.paidMinutes >= 4 * 60) errors.push({
+          employeeId: emp.id, date: shift.date,
+          message: `${emp.name}: định mức dưới 100 giờ/tháng chỉ được làm ca dưới 4 giờ công (${shift.date}).`,
+        });
+      }
+    }
+
 
     if (assignedMinutes < emp.targetMinutes) {
       warnings.push({
         employeeId: emp.id,
-        message: `${emp.name}: đã xếp ${assignedMinutes / 60} / ${emp.targetMinutes / 60} giờ, còn thiếu ${(emp.targetMinutes - assignedMinutes) / 60} giờ. Kiểm tra ngày làm được, giới hạn ngày làm mỗi tuần và giờ mở cửa.`,
+        message: `${emp.name}: đã xếp ${assignedMinutes / 60} / ${emp.targetMinutes / 60} giờ, còn thiếu ${(emp.targetMinutes - assignedMinutes) / 60} giờ.${emp.targetMinutes < 100 * 60 ? " Định mức dưới 100 giờ/tháng chỉ xếp ca dưới 4 giờ công." : ""} Kiểm tra ngày làm được, giới hạn ngày làm mỗi tuần và giờ mở cửa.`,
       });
     }
     if (assignedMinutes > emp.targetMinutes) {

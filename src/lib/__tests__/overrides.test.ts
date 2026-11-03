@@ -9,7 +9,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
     const overrides: OverrideMap = {
       "2026-08-08": { date: "2026-08-08", closed: true, note: "Betriebsruhe" },
     };
-    const shifts = generateSchedule({
+    const shifts = generateSchedule({ allowPartial: true,
       year: 2026,
       month: 8,
       workHours: DEFAULT_WORK_HOURS,
@@ -20,7 +20,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
 
     const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
     expect(result.valid).toBe(true);
-    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1022 * 60);
+    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1010 * 60);
   });
 
   it("halber Tag: Mitarbeiter arbeiten KÜRZERE Schichten (nicht frei), Soll exakt", () => {
@@ -33,7 +33,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
         note: "halber Tag",
       },
     };
-    const shifts = generateSchedule({
+    const shifts = generateSchedule({ allowPartial: true,
       year: 2026,
       month: 8,
       workHours: DEFAULT_WORK_HOURS,
@@ -51,6 +51,6 @@ describe("Ausnahmen je Datum (Overrides)", () => {
     }
     const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
     expect(result.valid).toBe(true);
-    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1022 * 60);
+    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1016 * 60);
   });
 });

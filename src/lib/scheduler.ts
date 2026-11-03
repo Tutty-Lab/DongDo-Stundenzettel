@@ -665,7 +665,9 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
       ? Math.min(missingCoverHours(state, isoDate), maxHours)
       : 0;
 
-    const hours = chooseShiftHours(
+    const hours = employee.targetMinutes < 100 * 60
+      ? (remaining >= 3 * 60 && maxHours >= 3 ? 3 : 0)
+      : chooseShiftHours(
       remaining,
       maxHours,
       employee.employmentType,

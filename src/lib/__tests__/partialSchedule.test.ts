@@ -23,8 +23,8 @@ describe("November partial schedule", () => {
     expect(shifts.filter(s => s.employeeId === employee.id)).toHaveLength(20);
     expect(result.summaries[0].assignedMinutes).toBe(160 * 60);
     expect(result.errors).toEqual([]);
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0].message).toContain("còn thiếu 8 giờ");
+    expect(result.warnings.some(w => w.employeeId === employee.id)).toBe(true);
+    expect(result.warnings.find(w => w.employeeId === employee.id)!.message).toContain("còn thiếu 8 giờ");
     for (const shift of shifts.filter(s => s.employeeId === employee.id)) {
       expect(employee.availableWeekdays).toContain(weekdayKeyOf(parseIsoDate(shift.date)));
       expect(shift.paidMinutes).toBeLessThanOrEqual(8 * 60);
@@ -35,6 +35,6 @@ describe("November partial schedule", () => {
       workHours: DEFAULT_WORK_HOURS, employees, allowPartial: true });
     const result = validateSchedule(employees.map(e => e.id === employee.id ? { ...e, targetMinutes: 150 * 60 } : e), shifts);
     expect(result.valid).toBe(false);
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings.every(w => w.employeeId !== employee.id)).toBe(true);
   });
 });
