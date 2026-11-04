@@ -21,25 +21,14 @@ const emp = (id: string, type: Employee["employmentType"], hours: number): Emplo
 const generate = (employees: Employee[]) =>
   generateSchedule({ year: 2026, month: 8, workHours: DEFAULT_WORK_HOURS, employees });
 
-describe("Soll kleiner als die kürzeste Schicht", () => {
-  it("nennt den wahren Grund statt der Kapazitätsdecke", () => {
-    // Früher kam hier ein Vortrag über die 6-Tage-Regel und eine Decke von
-    // über 200 h – für jemanden, der 2 h eingetragen hat, völlig nutzlos.
-    let message = "";
-    try {
-      generate([emp("a", "VOLLZEIT", 2)]);
-    } catch (e) {
-      message = (e as Error).message;
+describe("Small targets use whole-hour shifts without pauses", () => {
+  for (const hours of [1, 2, 3, 4]) it(`${hours}h remains schedulable`, () => {
+    const shifts = generate([emp("a", "TEILZEIT", hours)]);
+    expect(shifts.reduce((n, s) => n + s.paidMinutes, 0)).toBe(hours * 60);
+    for (const shift of shifts) {
+      expect([60, 120, 180, 240]).toContain(shift.paidMinutes);
+      expect(shift.pauseMinutes).toBe(0);
     }
-    expect(message).toContain("Định mức quá nhỏ");
-    expect(message).toContain("3h");
-    expect(message).not.toContain("6 ngày");
-  });
-
-  it("3 h ist die Untergrenze und geht durch", () => {
-    const shifts = generate([emp("a", "TEILZEIT", 3)]);
-    expect(shifts).toHaveLength(1);
-    expect(shifts[0].paidMinutes).toBe(180);
   });
 });
 

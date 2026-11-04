@@ -33,9 +33,7 @@ function splitInfo(targetHours: number, type: EmploymentType): { ok: boolean; te
   if (targetHours <= 0) return { ok: true, text: "—" };
   try {
     if (targetHours < 100) {
-      const count = Math.floor(targetHours / 3);
-      const missing = targetHours % 3;
-      return { ok: true, text: `${count} ca × 3h${missing ? ` · còn ${missing}h chưa xếp được` : ""} (dưới 100h: ca dưới 4h)` };
+      return { ok: true, text: "Dưới 100h: ca giờ nguyên từ 1h đến 4h, không nghỉ" };
     }
     const parts = splitTargetHours(Math.round(targetHours), type);
     return { ok: true, text: `${parts.length} ca` };

@@ -618,7 +618,7 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     const day = state.dayOf(isoDate);
     if (day.closed) continue;
     if (!mayWorkOn(employee, isoDate)) continue; // fester freier Wochentag
-    if (maxShiftHoursForWindow(windowLength(day)) === 0) continue;
+    if (windowLength(day) < (employee.targetMinutes < 100 * 60 ? 60 : 180)) continue;
     if (consecutiveRunLengthWith(worked, isoDate) > 6) continue;
     if (employee.maxDaysPerWeek) {
       const wk = weekStartOf(isoDate);
@@ -649,7 +649,9 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     const bodiesMissing = Math.max(0, wanted - dsNow.count);
 
     // Längste Schicht, die ins Fenster passt UND den Rest exakt aufteilbar lässt.
-    let maxHours = maxShiftHoursForWindow(windowLength(day));
+    let maxHours = employee.targetMinutes < 100 * 60
+      ? Math.min(4, Math.floor(windowLength(day) / 60))
+      : maxShiftHoursForWindow(windowLength(day));
 
     // Reichen die Stunden des Tages nicht für die volle Abdeckung, ist ZWEI
     // Personen wichtiger als eine lange. Vorher entstanden reihenweise Tage
@@ -681,8 +683,12 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
       ? Math.min(missingCoverHours(state, isoDate), maxHours)
       : 0;
 
+    // Under 100h: whole-hour shifts, at most 4 paid hours, no pause.
+    const shortOptions = [1, 2, 3, 4].filter(h => h <= maxHours && h * 60 <= remaining);
+    const shortHours = shortOptions.find(h => h >= Math.min(4, needHours))
+      ?? shortOptions[shortOptions.length - 1] ?? 0;
     const hours = employee.targetMinutes < 100 * 60
-      ? (remaining >= 3 * 60 && maxHours >= 3 ? 3 : 0)
+      ? shortHours
       : chooseShiftHours(
       remaining,
       maxHours,

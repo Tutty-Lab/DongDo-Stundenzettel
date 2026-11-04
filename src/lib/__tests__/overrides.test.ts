@@ -20,7 +20,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
 
     const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
     expect(result.valid).toBe(true);
-    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1010 * 60);
+    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1022 * 60);
   });
 
   it("halber Tag: Mitarbeiter arbeiten KÜRZERE Schichten (nicht frei), Soll exakt", () => {
@@ -51,6 +51,6 @@ describe("Ausnahmen je Datum (Overrides)", () => {
     }
     const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
     expect(result.valid).toBe(true);
-    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1016 * 60);
+    expect(shifts.reduce((a, s) => a + s.paidMinutes, 0)).toBe(1022 * 60);
   });
 });

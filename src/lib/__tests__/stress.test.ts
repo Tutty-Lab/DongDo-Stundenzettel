@@ -22,7 +22,7 @@ function audit(shifts: Shift[], employees: Employee[], year: number, overrides: 
   // 1. Monats-Soll exakt getroffen
   for (const e of employees) {
     const sum = shifts.filter((s) => s.employeeId === e.id).reduce((a, s) => a + s.paidMinutes, 0);
-    if (e.targetMinutes < 100 * 60 ? sum > e.targetMinutes || shifts.some(s => s.employeeId === e.id && s.paidMinutes >= 240) : sum !== e.targetMinutes) {
+    if (e.targetMinutes < 100 * 60 ? sum > e.targetMinutes || shifts.some(s => s.employeeId === e.id && (s.paidMinutes < 60 || s.paidMinutes > 240 || s.paidMinutes % 60 !== 0 || s.pauseMinutes !== 0)) : sum !== e.targetMinutes) {
       problems.push(`${e.id}: ${sum / 60}h thay vì ${e.targetMinutes / 60}h`);
     }
   }
@@ -60,7 +60,7 @@ function audit(shifts: Shift[], employees: Employee[], year: number, overrides: 
     if (s.endMinutes - s.startMinutes - s.pauseMinutes !== s.paidMinutes) {
       problems.push(`${s.date}/${s.employeeId}: giờ công không khớp`);
     }
-    if (s.paidMinutes < 3 * 60 || s.paidMinutes > 9 * 60) {
+    if (s.paidMinutes < (employees.find(e => e.id === s.employeeId)!.targetMinutes < 6000 ? 60 : 180) || s.paidMinutes > 9 * 60) {
       problems.push(`${s.date}/${s.employeeId}: ca ${s.paidMinutes / 60}h ngoài 3..9h`);
     }
   }
